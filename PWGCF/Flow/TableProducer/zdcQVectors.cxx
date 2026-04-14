@@ -14,47 +14,48 @@
 /// \since  11/2024
 /// \brief  In this task the energy calibration and recentring of Q-vectors constructed in the ZDCs will be done
 
-#include <stdlib.h>
-#include <cmath>
-#include <algorithm>
-#include <numeric>
-#include <vector>
-#include <typeinfo>
-#include <memory>
-#include <string>
+#include "PWGCF/DataModel/SPTableZDC.h"
 
-#include "CCDB/BasicCCDBManager.h"
 #include "Common/CCDB/EventSelectionParams.h"
 #include "Common/CCDB/TriggerAliases.h"
 #include "Common/Core/TrackSelection.h"
-#include "Common/DataModel/TrackSelectionTables.h"
 #include "Common/DataModel/Centrality.h"
-#include "Common/DataModel/Multiplicity.h"
 #include "Common/DataModel/EventSelection.h"
+#include "Common/DataModel/Multiplicity.h"
+#include "Common/DataModel/TrackSelectionTables.h"
 
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/runDataProcessing.h"
+#include "CCDB/BasicCCDBManager.h"
+#include "DataFormatsParameters/GRPMagField.h"
+#include "DataFormatsParameters/GRPObject.h"
 #include "Framework/ASoAHelpers.h"
+#include "Framework/AnalysisDataModel.h"
+#include "Framework/AnalysisTask.h"
+#include "Framework/HistogramRegistry.h"
 #include "Framework/RunningWorkflowInfo.h"
 #include "Framework/StaticFor.h"
-
-#include "DataFormatsParameters/GRPObject.h"
-#include "DataFormatsParameters/GRPMagField.h"
+#include "Framework/runDataProcessing.h"
 #include "ReconstructionDataFormats/GlobalTrackID.h"
 #include "ReconstructionDataFormats/Track.h"
-#include "PWGCF/DataModel/SPTableZDC.h"
 
-#include "TH1F.h"
-#include "TH2F.h"
-#include "TProfile.h"
-#include "TObjArray.h"
+#include "TCanvas.h"
 #include "TF1.h"
 #include "TFitResult.h"
-#include "TCanvas.h"
-#include "TSystem.h"
+#include "TH1F.h"
+#include "TH2F.h"
+#include "TObjArray.h"
+#include "TProfile.h"
 #include "TROOT.h"
+#include "TSystem.h"
+
+#include <algorithm>
+#include <cmath>
+#include <memory>
+#include <numeric>
+#include <string>
+#include <typeinfo>
+#include <vector>
+
+#include <stdlib.h>
 
 #define O2_DEFINE_CONFIGURABLE(NAME, TYPE, DEFAULT, HELP) Configurable<TYPE> NAME{#NAME, DEFAULT, HELP};
 
@@ -83,7 +84,7 @@ std::vector<double> pyZDC = {-1.75, -1.75, 1.75, 1.75};
 double alphaZDC = 0.395;
 
 // q-vectors before (q) and after (qRec) recentering.
-std::vector<double> q(4); // start values of [QxA, QyA, QxC, QyC]
+std::vector<double> q(4);     // start values of [QxA, QyA, QxC, QyC]
 std::vector<double> qNoEq(4); // start values of [QxA, QyA, QxC, QyC]
 
 // for energy calibration
@@ -99,6 +100,7 @@ std::vector<float> v(3, 0); // vx, vy, vz
 bool isSelected = true;
 std::vector<float> cents; // centrality estimaters
 uint64_t timestamp = 0;
+double rsTimestamp = 0;
 
 } // namespace o2::analysis::qvectortask
 
@@ -156,6 +158,7 @@ struct ZdcQVectors {
   O2_DEFINE_CONFIGURABLE(cfgFillHistRegistry, bool, true, "Fill common registry with histograms");
   O2_DEFINE_CONFIGURABLE(cfgFillCutAnalysis, bool, true, "Fill cut analysis with histograms");
   O2_DEFINE_CONFIGURABLE(cfgFillNothing, bool, false, "Disable ALL Histograms -> ONLY use to reduce memory");
+  O2_DEFINE_CONFIGURABLE(cfgNoGain, bool, false, "Do not apply gain correction to ZDC energy calibration");
 
   O2_DEFINE_CONFIGURABLE(cfgCCDBdir_Shift, std::string, "Users/c/ckoster/ZDC/LHC23_PbPb_pass5/Shift", "CCDB directory for Shift ZDC");
 
@@ -213,6 +216,24 @@ struct ZdcQVectors {
     kAfter
   };
 
+  // Added for histograms
+  // Component indices
+  enum { QXA = 0,
+         QYA = 1,
+         QXC = 2,
+         QYC = 3 };
+
+  // Histogram container
+  struct HistSet {
+    std::shared_ptr<TProfile> cent;
+    std::shared_ptr<TProfile> vx;
+    std::shared_ptr<TProfile> vy;
+    std::shared_ptr<TProfile> vz;
+  };
+
+  // [iteration][step][component]
+  std::vector<std::vector<std::array<HistSet, 4>>> hQ;
+
   void init(InitContext const&)
   {
     ccdb->setURL("http://alice-ccdb.cern.ch");
@@ -228,7 +249,9 @@ struct ZdcQVectors {
     std::vector<const char*> capCOORDS = {"X", "Y"};
 
     AxisSpec axisPsiA = {100, -PI, PI, "#Psi_{1} ZNA"};
+    AxisSpec axisPsiAShifted = {100, -PI, PI, "#Psi_{1} ZNA Shifted"};
     AxisSpec axisPsiC = {100, -PI, PI, "#Psi_{1} ZNC"};
+    AxisSpec axisPsiCShifted = {100, -PI, PI, "#Psi_{1} ZNC Shifted"};
 
     // This is the only histogram that is AL~WA~YS filled.
     registry.add("hEventCount", "Number of Event; Cut; #Events Passed Cut", {HistType::kTH1D, {{nEventSelections, 0, nEventSelections}}});
@@ -304,12 +327,16 @@ struct ZdcQVectors {
         registry.add<TProfile>("QA/ZNA_Energy", "ZNA_Energy", kTProfile, {{8, 0, 8}});
         registry.add<TProfile>("QA/ZNC_Energy", "ZNC_Energy", kTProfile, {{8, 0, 8}});
 
-        registry.add<TH2>("QA/psiZDCA", "psiZDCA", kTH2D, {axisPsiA, {100, 0, 100}});
-        registry.add<TH2>("QA/psiZDCA_shift", "psiZDCA_shift", kTH2D, {axisPsiA, {100, 0, 100}});
-        registry.add<TH2>("QA/psiZDCC", "psiZDCC", kTH2D, {axisPsiC, {100, 0, 100}});
-        registry.add<TH2>("QA/psiZDCC_shift", "psiZDCC_shift", kTH2D, {axisPsiC, {100, 0, 100}});
-        registry.add<TH2>("QA/psiZDCAC", "psiZDCAC", kTH2D, {axisPsiA, axisPsiC});
-        registry.add<TH2>("QA/psiZDCAC_shift", "psiZDCAC_shift", kTH2D, {axisPsiA, axisPsiC});
+        registry.add<TH2>("QA/shift/psiZDCA", "psiZDCA", kTH2D, {axisPsiA, {100, 0, 100}});
+        registry.add<TH2>("QA/shift/psiZDCA_shift", "psiZDCA_shift", kTH2D, {axisPsiA, {100, 0, 100}});
+        registry.add<TH2>("QA/shift/psiZDCC", "psiZDCC", kTH2D, {axisPsiC, {100, 0, 100}});
+        registry.add<TH2>("QA/shift/psiZDCC_shift", "psiZDCC_shift", kTH2D, {axisPsiC, {100, 0, 100}});
+        registry.add<TH2>("QA/shift/psiZDCAC", "psiZDCAC", kTH2D, {axisPsiA, axisPsiC});
+        registry.add<TH2>("QA/shift/psiZDCAC_shift", "psiZDCAC_shift", kTH2D, {axisPsiA, axisPsiC});
+
+        registry.add<TH2>("QA/shift/DeltaPsiZDCA", "DeltaPsiZDCA", kTH2D, {axisPsiAShifted, axisPsiA});
+        registry.add<TH2>("QA/shift/DeltaPsiZDCC", "DeltaPsiZDCC", kTH2D, {axisPsiCShifted, axisPsiC});
+        registry.add<TH2>("QA/shift/DeltaPsiZDCAC", "DeltaPsiZDCAC", kTH2D, {axisPsiA, axisPsiC});
 
         registry.add<TProfile>("QA/before/ZNA_pmC", "ZNA_pmC", kTProfile, {{1, 0, 1.}});
         registry.add<TProfile>("QA/before/ZNA_pm1", "ZNA_pm1", kTProfile, {{1, 0, 1.}});
@@ -347,12 +374,62 @@ struct ZdcQVectors {
         registry.add<TH2>("QA/before/ZNC_pm3_vs_Centrality", "ZNC_pm3_vs_Centrality", kTH2D, {{100, 0, 100}, {100, 0, 1}});
         registry.add<TH2>("QA/before/ZNC_pm4_vs_Centrality", "ZNC_pm4_vs_Centrality", kTH2D, {{100, 0, 100}, {100, 0, 1}});
 
+        // Added
+        registry.add<TH2>("QA/before/ZNA_sumPM1-4_vs_Common", "ZNA_sumPM1-4_vs_Common", kTH2D, {{300, 0, 300}, {300, 0, 300}});
+        registry.add<TH2>("QA/before/ZNC_sumPM1-4_vs_Common", "ZNC_sumPM1-4_vs_Common", kTH2D, {{300, 0, 300}, {300, 0, 300}});
+        registry.add<TH2>("QA/before/ZNA_sumPM1-4_over_Common_vs_Common", "ZNA_sumPM1-4_over_Common_vs_Common", kTH2D, {{300, 0, 300}, {300, 0.5, 1.5}});
+        registry.add<TH2>("QA/before/ZNC_sumPM1-4_over_Common_vs_Common", "ZNC_sumPM1-4_over_Common_vs_Common", kTH2D, {{300, 0, 300}, {300, 0.5, 1.5}});
+
         registry.addClone("QA/before/", "QA/after/");
 
         registry.add<TProfile>("QA/before/ZNA_Qx_noEq", "ZNA_Qx_noEq", kTProfile, {{1, 0, 1.}});
         registry.add<TProfile>("QA/before/ZNA_Qy_noEq", "ZNA_Qy_noEq", kTProfile, {{1, 0, 1.}});
         registry.add<TProfile>("QA/before/ZNC_Qx_noEq", "ZNC_Qx_noEq", kTProfile, {{1, 0, 1.}});
         registry.add<TProfile>("QA/before/ZNC_Qy_noEq", "ZNC_Qy_noEq", kTProfile, {{1, 0, 1.}});
+
+        // Add histograms per recentering iteration
+        // Make sure number of iterations matches
+        int nIterations = 5;
+
+        // Only one step per iteration for now
+        int nSteps = 1;
+
+        // Resize hQ properly: [iteration][step][component]
+        hQ.resize(nIterations);
+        for (int it = 0; it < nIterations; it++) {
+          hQ[it].resize(nSteps);
+        }
+
+        // Component names
+        const char* compNames[4] = {"QXA", "QYA", "QXC", "QYC"};
+
+        // Declaring histograms for iterations only, so 1 step
+        for (int it = 1; it <= nIterations; it++) {
+          int step = 1; // fixed step
+          for (int c = 0; c < 4; c++) {
+            auto& h = hQ[it - 1][step - 1][c];
+
+            h.cent = registry.add<TProfile>(
+              Form("QA/it%d_step%d/h%s_vs_cent", it, step, compNames[c]),
+              Form("%s vs centrality;Centrality (%);%s", compNames[c], compNames[c]),
+              {HistType::kTProfile, {axisCent}});
+
+            h.vx = registry.add<TProfile>(
+              Form("QA/it%d_step%d/h%s_vs_vx", it, step, compNames[c]),
+              Form("%s vs vertex x;vertex x (cm);%s", compNames[c], compNames[c]),
+              {HistType::kTProfile, {axisVx}});
+
+            h.vy = registry.add<TProfile>(
+              Form("QA/it%d_step%d/h%s_vs_vy", it, step, compNames[c]),
+              Form("%s vs vertex y;vertex y (cm);%s", compNames[c], compNames[c]),
+              {HistType::kTProfile, {axisVy}});
+
+            h.vz = registry.add<TProfile>(
+              Form("QA/it%d_step%d/h%s_vs_vz", it, step, compNames[c]),
+              Form("%s vs vertex z;vertex z (cm);%s", compNames[c], compNames[c]),
+              {HistType::kTProfile, {axisVz}});
+          }
+        }
       }
 
       // Tower mean energies vs. centrality used for tower gain equalisation
@@ -380,6 +457,19 @@ struct ZdcQVectors {
         registry.add<TProfile2D>("CutAnalysis/hvertex_vy", "hvertex_vy", kTProfile2D, {{1, 0., 1.}, {nEventSelections + 5, 0, nEventSelections + 5}});
         registry.add<TProfile2D>("CutAnalysis/hvertex_vz", "hvertex_vz", kTProfile2D, {{1, 0., 1.}, {nEventSelections + 5, 0, nEventSelections + 5}});
       }
+    }
+  }
+
+  // Added for iteration and step histograms for recentering
+  inline void fillStep(int it, int step, const std::vector<double>& q, const std::vector<float>& v, double centrality)
+  {
+    for (int c = 0; c < 4; c++) {
+      auto& h = hQ[it - 1][step - 1][c];
+
+      h.cent->Fill(centrality, q[c]);
+      h.vx->Fill(v[0], q[c]);
+      h.vy->Fill(v[1], q[c]);
+      h.vz->Fill(v[2], q[c]);
     }
   }
 
@@ -528,7 +618,7 @@ struct ZdcQVectors {
   }
 
   template <FillType ft>
-  inline void fillCommonRegistry(double qxa, double qya, double qxc, double qyc, std::vector<float> v, double centrality)
+  inline void fillCommonRegistry(double qxa, double qya, double qxc, double qyc, std::vector<float> v, double centrality, double rsTimestamp)
   {
     // loop for filling multiple histograms with different naming patterns
     //  Always fill the uncentered "raw" Q-vector histos!
@@ -579,15 +669,15 @@ struct ZdcQVectors {
     registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQYA_QXC_vs_vz"), v[2], qya * qxc);
     registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQXA_QYC_vs_vz"), v[2], qxa * qyc);
 
-    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQXA_vs_timestamp"), rescaleTimestamp(timestamp, runnumber), qxa);
-    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQYA_vs_timestamp"), rescaleTimestamp(timestamp, runnumber), qya);
-    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQXC_vs_timestamp"), rescaleTimestamp(timestamp, runnumber), qxc);
-    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQYC_vs_timestamp"), rescaleTimestamp(timestamp, runnumber), qyc);
+    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQXA_vs_timestamp"), rsTimestamp, qxa);
+    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQYA_vs_timestamp"), rsTimestamp, qya);
+    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQXC_vs_timestamp"), rsTimestamp, qxc);
+    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQYC_vs_timestamp"), rsTimestamp, qyc);
 
-    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQXA_QXC_vs_timestamp"), rescaleTimestamp(timestamp, runnumber), qxa * qxc);
-    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQYA_QYC_vs_timestamp"), rescaleTimestamp(timestamp, runnumber), qya * qyc);
-    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQYA_QXC_vs_timestamp"), rescaleTimestamp(timestamp, runnumber), qya * qxc);
-    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQXA_QYC_vs_timestamp"), rescaleTimestamp(timestamp, runnumber), qxa * qyc);
+    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQXA_QXC_vs_timestamp"), rsTimestamp, qxa * qxc);
+    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQYA_QYC_vs_timestamp"), rsTimestamp, qya * qyc);
+    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQYA_QXC_vs_timestamp"), rsTimestamp, qya * qxc);
+    registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/hQXA_QYC_vs_timestamp"), rsTimestamp, qxa * qyc);
 
     registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/ZNA_Qx_vs_Centrality"), centrality, qxa);
     registry.fill(HIST("QA/") + HIST(Time[ft]) + HIST("/ZNA_Qy_vs_Centrality"), centrality, qya);
@@ -679,7 +769,7 @@ struct ZdcQVectors {
         bin = h->GetXaxis()->FindBin(TString::Format("%i", runnumber));
       }
       if (name.Contains("timestamp")) {
-        bin = h->GetXaxis()->FindBin(rescaleTimestamp(timestamp, runnumber));
+        bin = h->GetXaxis()->FindBin(rsTimestamp);
       }
       calibConstant = h->GetBinContent(bin);
     } else if (hist->InheritsFrom("THnSparse")) {
@@ -724,7 +814,6 @@ struct ZdcQVectors {
     std::vector<float> centralities;
 
     auto cent = collision.centFT0C();
-    centrality = cent;
 
     centralities.push_back(collision.centFT0C());
 
@@ -751,6 +840,7 @@ struct ZdcQVectors {
 
     v = {collision.posX(), collision.posY(), collision.posZ()};
     cents = centralities;
+    centrality = cent;
 
     const auto& foundBC = collision.foundBC_as<BCsRun3>();
     runnumber = foundBC.runNumber();
@@ -761,6 +851,7 @@ struct ZdcQVectors {
     registry.fill(HIST("hEventCount"), evSel_FilteredEvent);
 
     timestamp = foundBC.timestamp();
+    rsTimestamp = rescaleTimestamp(timestamp, runnumber);
 
     if (!foundBC.has_zdc()) {
       isSelected = false;
@@ -960,6 +1051,18 @@ struct ZdcQVectors {
         registry.fill(HIST("QA/") + HIST("after") + HIST("/ZNC_pm2_vs_Centrality"), centrality, e[5] / sumZNCafter);
         registry.fill(HIST("QA/") + HIST("after") + HIST("/ZNC_pm3_vs_Centrality"), centrality, e[6] / sumZNCafter);
         registry.fill(HIST("QA/") + HIST("after") + HIST("/ZNC_pm4_vs_Centrality"), centrality, e[7] / sumZNCafter);
+
+        // Added: compare sum of PMTs 1-4 with common energy
+        // 2D correlation plots with common energy on x-axis and sum of PMTs 1-4 on y-axis
+        registry.fill(HIST("QA/") + HIST("before") + HIST("/ZNA_sumPM1-4_vs_Common"), zdcCol.energyCommonZNA(), sumZNAbefore);
+        registry.fill(HIST("QA/") + HIST("before") + HIST("/ZNC_sumPM1-4_vs_Common"), zdcCol.energyCommonZNC(), sumZNCbefore);
+        registry.fill(HIST("QA/") + HIST("after") + HIST("/ZNA_sumPM1-4_vs_Common"), zdcCol.energyCommonZNA(), sumZNAafter);
+        registry.fill(HIST("QA/") + HIST("after") + HIST("/ZNC_sumPM1-4_vs_Common"), zdcCol.energyCommonZNC(), sumZNCafter);
+        // 1D profiles of ratio of sum PMTs 1-4 over common energy vs common energy
+        registry.fill(HIST("QA/") + HIST("before") + HIST("/ZNA_sumPM1-4_over_Common_vs_Common"), zdcCol.energyCommonZNA(), sumZNAbefore / zdcCol.energyCommonZNA());
+        registry.fill(HIST("QA/") + HIST("before") + HIST("/ZNC_sumPM1-4_over_Common_vs_Common"), zdcCol.energyCommonZNC(), sumZNCbefore / zdcCol.energyCommonZNC());
+        registry.fill(HIST("QA/") + HIST("after") + HIST("/ZNA_sumPM1-4_over_Common_vs_Common"), zdcCol.energyCommonZNA(), sumZNAafter / zdcCol.energyCommonZNA());
+        registry.fill(HIST("QA/") + HIST("after") + HIST("/ZNC_sumPM1-4_over_Common_vs_Common"), zdcCol.energyCommonZNC(), sumZNCafter / zdcCol.energyCommonZNC());
       }
     }
 
@@ -992,6 +1095,22 @@ struct ZdcQVectors {
       }
     }
 
+    if (cfgFillHistRegistry && !cfgFillNothing) {
+      registry.get<TProfile>(HIST("QA/before/ZNA_Qx"))->Fill(Form("%d", runnumber), q[0]);
+      registry.get<TProfile>(HIST("QA/before/ZNA_Qy"))->Fill(Form("%d", runnumber), q[1]);
+      registry.get<TProfile>(HIST("QA/before/ZNC_Qx"))->Fill(Form("%d", runnumber), q[2]);
+      registry.get<TProfile>(HIST("QA/before/ZNC_Qy"))->Fill(Form("%d", runnumber), q[3]);
+
+      registry.get<TProfile>(HIST("QA/before/ZNA_Qx_noEq"))->Fill(Form("%d", runnumber), qNoEq[0]);
+      registry.get<TProfile>(HIST("QA/before/ZNA_Qy_noEq"))->Fill(Form("%d", runnumber), qNoEq[1]);
+      registry.get<TProfile>(HIST("QA/before/ZNC_Qx_noEq"))->Fill(Form("%d", runnumber), qNoEq[2]);
+      registry.get<TProfile>(HIST("QA/before/ZNC_Qy_noEq"))->Fill(Form("%d", runnumber), qNoEq[3]);
+    }
+
+    if (cfgNoGain) {
+      q = qNoEq;
+    }
+
     if (cal.calibfilesLoaded[1]) {
       v[0] = v[0] - getCorrection<TProfile, kMeanv>(vnames[0].Data());
       v[1] = v[1] - getCorrection<TProfile, kMeanv>(vnames[1].Data());
@@ -1008,21 +1127,9 @@ struct ZdcQVectors {
 
     std::vector<double> qRec(q);
 
-    if (cfgFillHistRegistry && !cfgFillNothing) {
-      registry.get<TProfile>(HIST("QA/before/ZNA_Qx"))->Fill(Form("%d", runnumber), q[0]);
-      registry.get<TProfile>(HIST("QA/before/ZNA_Qy"))->Fill(Form("%d", runnumber), q[1]);
-      registry.get<TProfile>(HIST("QA/before/ZNC_Qx"))->Fill(Form("%d", runnumber), q[2]);
-      registry.get<TProfile>(HIST("QA/before/ZNC_Qy"))->Fill(Form("%d", runnumber), q[3]);
-
-      registry.get<TProfile>(HIST("QA/before/ZNA_Qx_noEq"))->Fill(Form("%d", runnumber), qNoEq[0]);
-      registry.get<TProfile>(HIST("QA/before/ZNA_Qy_noEq"))->Fill(Form("%d", runnumber), qNoEq[1]);
-      registry.get<TProfile>(HIST("QA/before/ZNC_Qx_noEq"))->Fill(Form("%d", runnumber), qNoEq[2]);
-      registry.get<TProfile>(HIST("QA/before/ZNC_Qy_noEq"))->Fill(Form("%d", runnumber), qNoEq[3]);
-    }
-
     if (cal.atIteration == 0) {
       if (isSelected && cfgFillHistRegistry)
-        fillCommonRegistry<kBefore>(q[0], q[1], q[2], q[3], v, centrality);
+        fillCommonRegistry<kBefore>(q[0], q[1], q[2], q[3], v, centrality, rsTimestamp);
 
       spTableZDC(runnumber, cents, v, foundBC.timestamp(), q[0], q[1], q[2], q[3], isSelected, eventSelectionFlags);
       counter++;
@@ -1030,7 +1137,7 @@ struct ZdcQVectors {
       return;
     } else {
       if (cfgFillHistRegistry)
-        fillCommonRegistry<kBefore>(q[0], q[1], q[2], q[3], v, centrality);
+        fillCommonRegistry<kBefore>(q[0], q[1], q[2], q[3], v, centrality, rsTimestamp);
 
       // vector of 4
       std::vector<double> corrQxA;
@@ -1043,6 +1150,9 @@ struct ZdcQVectors {
       int nIterations = 5;
       int nSteps = 5;
 
+      // Extra q vectors for every iteration
+      std::vector<double> qStep(q); // working Q-vector
+
       for (int it = 1; it <= nIterations; it++) {
         corrQxA.push_back(getCorrection<THnSparse, kRec>(names[0][0].Data(), it, 1));
         corrQyA.push_back(getCorrection<THnSparse, kRec>(names[0][1].Data(), it, 1));
@@ -1050,12 +1160,22 @@ struct ZdcQVectors {
         corrQyC.push_back(getCorrection<THnSparse, kRec>(names[0][3].Data(), it, 1));
         pb++;
 
+        qStep[0] -= corrQxA.back();
+        qStep[1] -= corrQyA.back();
+        qStep[2] -= corrQxC.back();
+        qStep[3] -= corrQyC.back();
+
         for (int step = 2; step <= nSteps; step++) {
           corrQxA.push_back(getCorrection<TProfile, kRec>(names[step - 1][0].Data(), it, step));
           corrQyA.push_back(getCorrection<TProfile, kRec>(names[step - 1][1].Data(), it, step));
           corrQxC.push_back(getCorrection<TProfile, kRec>(names[step - 1][2].Data(), it, step));
           corrQyC.push_back(getCorrection<TProfile, kRec>(names[step - 1][3].Data(), it, step));
           pb++;
+
+          qStep[0] -= corrQxA.back();
+          qStep[1] -= corrQyA.back();
+          qStep[2] -= corrQxC.back();
+          qStep[3] -= corrQyC.back();
         }
 
         if (extraTS.cfgRecenterForTimestamp) {
@@ -1064,7 +1184,14 @@ struct ZdcQVectors {
           corrQxC.push_back(getCorrection<TProfile, kTimestamp>(namesTS[2].Data(), it, 6));
           corrQyC.push_back(getCorrection<TProfile, kTimestamp>(namesTS[3].Data(), it, 6));
           pb++;
+
+          // Apply corrections
+          qStep[0] -= corrQxA.back();
+          qStep[1] -= corrQyA.back();
+          qStep[2] -= corrQxC.back();
+          qStep[3] -= corrQyC.back();
         }
+        fillStep(it, 1, qStep, v, centrality);
       }
 
       double totalCorrectionQxA = std::accumulate(corrQxA.begin(), corrQxA.end(), 0.0);
@@ -1087,7 +1214,7 @@ struct ZdcQVectors {
       }
 
       if (isSelected && cfgFillHistRegistry && !cfgFillNothing) {
-        fillCommonRegistry<kAfter>(qRec[0], qRec[1], qRec[2], qRec[3], v, centrality);
+        fillCommonRegistry<kAfter>(qRec[0], qRec[1], qRec[2], qRec[3], v, centrality, rsTimestamp);
         registry.fill(HIST("QA/centrality_after"), centrality);
         registry.get<TProfile>(HIST("QA/after/ZNA_Qx"))->Fill(Form("%d", runnumber), qRec[0]);
         registry.get<TProfile>(HIST("QA/after/ZNA_Qy"))->Fill(Form("%d", runnumber), qRec[1]);
@@ -1164,18 +1291,30 @@ struct ZdcQVectors {
       psiZDCAshift = std::atan2(std::sin(psiZDCAshift), std::cos(psiZDCAshift));
 
       if (cfgFillHistRegistry && !cfgFillNothing) {
-        registry.fill(HIST("QA/psiZDCA"), psiZDCA, centrality);
-        registry.fill(HIST("QA/psiZDCC"), psiZDCC, centrality);
-        registry.fill(HIST("QA/psiZDCAC"), psiZDCA, psiZDCC);
-        registry.fill(HIST("QA/psiZDCA_shift"), psiZDCAshift, centrality);
-        registry.fill(HIST("QA/psiZDCC_shift"), psiZDCCshift, centrality);
-        registry.fill(HIST("QA/psiZDCAC_shift"), psiZDCAshift, psiZDCCshift);
+        registry.fill(HIST("QA/shift/psiZDCA"), psiZDCA, centrality);
+        registry.fill(HIST("QA/shift/psiZDCC"), psiZDCC, centrality);
+        registry.fill(HIST("QA/shift/psiZDCAC"), psiZDCA, psiZDCC);
+        registry.fill(HIST("QA/shift/psiZDCA_shift"), psiZDCAshift, centrality);
+        registry.fill(HIST("QA/shift/psiZDCC_shift"), psiZDCCshift, centrality);
+        registry.fill(HIST("QA/shift/psiZDCAC_shift"), psiZDCAshift, psiZDCCshift);
+        registry.fill(HIST("QA/shift/DeltaPsiZDCA"), psiZDCAshift, psiZDCA);
+        registry.fill(HIST("QA/shift/DeltaPsiZDCC"), psiZDCCshift, psiZDCC);
+        registry.fill(HIST("QA/shift/DeltaPsiZDCAC"), psiZDCAshift - psiZDCA, psiZDCCshift - psiZDCC);
       }
 
       double qXaShift = std::hypot(qRec[1], qRec[0]) * std::cos(psiZDCAshift);
       double qYaShift = std::hypot(qRec[1], qRec[0]) * std::sin(psiZDCAshift);
       double qXcShift = std::hypot(qRec[2], qRec[3]) * std::cos(psiZDCCshift);
       double qYcShift = std::hypot(qRec[2], qRec[3]) * std::sin(psiZDCCshift);
+
+      if (isSelected && cfgFillHistRegistry && !cfgFillNothing) {
+        fillCommonRegistry<kAfter>(qRec[0], qRec[1], qRec[2], qRec[3], v, centrality, rsTimestamp);
+        registry.fill(HIST("QA/centrality_after"), centrality);
+        registry.get<TProfile>(HIST("QA/after/ZNA_Qx"))->Fill(Form("%d", runnumber), qXaShift);
+        registry.get<TProfile>(HIST("QA/after/ZNA_Qy"))->Fill(Form("%d", runnumber), qYaShift);
+        registry.get<TProfile>(HIST("QA/after/ZNC_Qx"))->Fill(Form("%d", runnumber), qXcShift);
+        registry.get<TProfile>(HIST("QA/after/ZNC_Qy"))->Fill(Form("%d", runnumber), qYcShift);
+      }
 
       spTableZDC(runnumber, cents, v, foundBC.timestamp(), qXaShift, qYaShift, qXcShift, qYcShift, isSelected, eventSelectionFlags);
       qRec.clear();
