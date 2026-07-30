@@ -10,7 +10,7 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file   Flowv1PiKaPrSP.cxx
+/// \file   flowDeltav1SP.cxx
 /// \author Annet Konings (based on flowSP.cxx by Noor Koster)
 /// \since  30/07/2026
 /// \brief  task to evaluate flow with respect to spectator plane with pions, kaons, protons.
@@ -83,7 +83,7 @@ inline std::vector<double> make_arange(double start, double stop, double step) {
     return res;
 }
 
-struct Flowv1PiKaPrSP {
+struct FlowDeltav1SP {
 
   // event selection configurable group
   struct : ConfigurableGroup {
@@ -1942,7 +1942,7 @@ template <typename TCollision>
     }
   }
 
-  PROCESS_SWITCH(Flowv1PiKaPrSP, processData, "Process analysis for non-derived data", true);
+  PROCESS_SWITCH(FlowDeltav1SP, processData, "Process analysis for non-derived data", true);
 
   void processDataPID(ZDCCollisions::iterator const& collision, aod::BCsWithTimestamps const&, UsedTracksPID const& tracks)
   {
@@ -2167,7 +2167,7 @@ template <typename TCollision>
     } // end of track loop
   }
 
-  PROCESS_SWITCH(Flowv1PiKaPrSP, processDataPID, "Process analysis for non-derived data with PID", false);
+  PROCESS_SWITCH(FlowDeltav1SP, processDataPID, "Process analysis for non-derived data with PID", false);
 
   void processMCReco(CC const& collision, aod::BCsWithTimestamps const&, TCs const& tracks, FilteredTCs const& filteredTracks, aod::McParticles const&)
   {
@@ -2292,7 +2292,7 @@ template <typename TCollision>
 
     } // end of track loop
   }
-  PROCESS_SWITCH(Flowv1PiKaPrSP, processMCReco, "Process analysis for MC reconstructed events", false);
+  PROCESS_SWITCH(FlowDeltav1SP, processMCReco, "Process analysis for MC reconstructed events", false);
 
   void processMCGen(aod::McCollisions const& mcCollisions, CCs const& collisions, TCs const& tracks, FilteredTCs const& filteredTracks, MCs const& McParts)
   {
@@ -2398,11 +2398,11 @@ template <typename TCollision>
       }
     }
   }
-  PROCESS_SWITCH(Flowv1PiKaPrSP, processMCGen, "Process analysis for MC generated events", false);
+  PROCESS_SWITCH(FlowDeltav1SP, processMCGen, "Process analysis for MC generated events", false);
 };
 
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {
   return WorkflowSpec{
-    adaptAnalysisTask<Flowv1PiKaPrSP>(cfgc)};
+    adaptAnalysisTask<FlowDeltav1SP>(cfgc)};
 }
