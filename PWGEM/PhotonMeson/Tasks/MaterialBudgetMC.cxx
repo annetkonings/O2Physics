@@ -18,9 +18,12 @@
 #include "PWGEM/PhotonMeson/Core/HistogramsLibrary.h"
 #include "PWGEM/PhotonMeson/Core/PairCut.h"
 #include "PWGEM/PhotonMeson/Core/V0PhotonCut.h"
+#include "PWGEM/PhotonMeson/DataModel/EventTables.h"
 #include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
 #include "PWGEM/PhotonMeson/Utils/MCUtilities.h"
 #include "PWGEM/PhotonMeson/Utils/PairUtilities.h"
+
+#include "Common/Core/RecoDecay.h"
 //
 #include "PWGEM/Dilepton/Utils/MCUtilities.h"
 
@@ -34,15 +37,14 @@
 #include <Framework/InitContext.h>
 #include <Framework/runDataProcessing.h>
 
-#include <Math/Vector4D.h> // IWYU pragma: keep
+#include <Math/Vector4D.h> // IWYU pragma: keep (do not replace with Math/Vector4Dfwd.h)
 #include <Math/Vector4Dfwd.h>
 #include <THashList.h>
-#include <TMath.h>
 #include <TString.h>
 
 #include <cmath>
 #include <cstdint>
-#include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -57,7 +59,7 @@ using namespace o2::aod::pwgem::photonmeson::utils::mcutil;
 using namespace o2::aod::pwgem::dilepton::utils::mcutil;
 using namespace o2::aod::pwgem::photon;
 
-using MyCollisions = soa::Join<aod::EMEvents, aod::EMEventsAlias, aod::EMEventsMult, aod::EMEventsCent, aod::EMMCEventLabels>;
+using MyCollisions = soa::Join<aod::PMEvents, aod::EMEventsAlias, aod::EMEventsMult_000, aod::EMEventsCent_000, aod::EMMCEventLabels>;
 using MyCollision = MyCollisions::iterator;
 
 using MyV0Photons = soa::Join<aod::V0PhotonsKF, aod::V0KFEMEventIds>;
@@ -118,12 +120,8 @@ struct MaterialBudgetMC {
   {
     for (const auto& tagcut : tagcuts) {
       for (const auto& probecut : probecuts) {
-        std::string cutname1 = tagcut.GetName();
-        std::string cutname2 = probecut.GetName();
-
-        // if (cutname1 == cutname2) {
-        //   continue;
-        // }
+        std::string cutname1 = tagcut.getName();
+        std::string cutname2 = probecut.getName();
 
         THashList* list_pair_subsys = reinterpret_cast<THashList*>(list_pair->FindObject(pairname.data()));
         std::string photon_cut_name = cutname1 + "_" + cutname2;
@@ -131,7 +129,7 @@ struct MaterialBudgetMC {
         THashList* list_pair_subsys_photoncut = reinterpret_cast<THashList*>(list_pair_subsys->FindObject(photon_cut_name.data()));
 
         for (const auto& cut3 : cuts3) {
-          std::string pair_cut_name = cut3.GetName();
+          std::string pair_cut_name = cut3.getName();
           o2::aod::pwgem::photon::histogram::AddHistClass(list_pair_subsys_photoncut, pair_cut_name.data());
           THashList* list_pair_subsys_paircut = reinterpret_cast<THashList*>(list_pair_subsys_photoncut->FindObject(pair_cut_name.data()));
           o2::aod::pwgem::photon::histogram::DefineHistograms(list_pair_subsys_paircut, "material_budget_study", "Pair");
@@ -158,8 +156,8 @@ struct MaterialBudgetMC {
 
     // for V0s
     for (const auto& cut : fProbeCuts) {
-      const char* cutname = cut.GetName();
-      THashList* list_v0_cut = o2::aod::pwgem::photon::histogram::AddHistClass(list_v0, cutname);
+      std::string cutname = cut.getName();
+      THashList* list_v0_cut = o2::aod::pwgem::photon::histogram::AddHistClass(list_v0, cutname.c_str());
       o2::aod::pwgem::photon::histogram::DefineHistograms(list_v0_cut, "material_budget_study", "V0");
     }
 
@@ -187,47 +185,56 @@ struct MaterialBudgetMC {
 
   void DefineTagCuts()
   {
-    TString cutNamesStr = fConfigTagCuts.value;
-    if (!cutNamesStr.IsNull()) {
-      std::unique_ptr<TObjArray> objArray(cutNamesStr.Tokenize(","));
-      for (int icut = 0; icut < objArray->GetEntries(); ++icut) {
-        const char* cutname = objArray->At(icut)->GetName();
-        LOGF(info, "add cut : %s", cutname);
-        fTagCuts.push_back(*pcmcuts::GetCut(cutname));
-      }
+    if (fConfigTagCuts.value.empty()) {
+      return;
+    }
+
+    std::string_view namesView(fConfigTagCuts.value);
+
+    for (auto name : namesView | std::views::split(',')) {
+      std::string cutString(name.begin(), name.end());
+      const char* cutname = cutString.c_str();
+      LOGF(info, "add tag cut : %s", cutname);
+      fTagCuts.push_back(*pcmcuts::GetCut(cutname));
     }
     LOGF(info, "Number of Tag PCM cuts = %d", fTagCuts.size());
   }
 
   void DefineProbeCuts()
   {
-    TString cutNamesStr = fConfigProbeCuts.value;
-    if (!cutNamesStr.IsNull()) {
-      std::unique_ptr<TObjArray> objArray(cutNamesStr.Tokenize(","));
-      for (int icut = 0; icut < objArray->GetEntries(); ++icut) {
-        const char* cutname = objArray->At(icut)->GetName();
-        LOGF(info, "add cut : %s", cutname);
-        fProbeCuts.push_back(*pcmcuts::GetCut(cutname));
-      }
+    if (fConfigProbeCuts.value.empty()) {
+      return;
+    }
+
+    std::string_view namesView(fConfigProbeCuts.value);
+
+    for (auto name : namesView | std::views::split(',')) {
+      std::string cutString(name.begin(), name.end());
+      const char* cutname = cutString.c_str();
+      LOGF(info, "add probe cut : %s", cutname);
+      fProbeCuts.push_back(*pcmcuts::GetCut(cutname));
     }
     LOGF(info, "Number of Probe PCM cuts = %d", fProbeCuts.size());
   }
 
   void DefinePairCuts()
   {
-    TString cutNamesStr = fConfigPairCuts.value;
-    if (!cutNamesStr.IsNull()) {
-      std::unique_ptr<TObjArray> objArray(cutNamesStr.Tokenize(","));
-      for (int icut = 0; icut < objArray->GetEntries(); ++icut) {
-        const char* cutname = objArray->At(icut)->GetName();
-        LOGF(info, "add cut : %s", cutname);
-        fPairCuts.push_back(*paircuts::GetCut(cutname));
-      }
+    if (fConfigPairCuts.value.empty()) {
+      return;
+    }
+
+    std::string_view namesView(fConfigPairCuts.value);
+
+    for (auto name : namesView | std::views::split(',')) {
+      std::string cutString(name.begin(), name.end());
+      const char* cutname = cutString.c_str();
+      LOGF(info, "add pair cut : %s", cutname);
+      fPairCuts.push_back(*paircuts::GetCut(cutname));
     }
     LOGF(info, "Number of Pair cuts = %d", fPairCuts.size());
   }
 
-  Preslice<MyV0Photons> perCollision_pcm = aod::v0photonkf::emeventId;
+  Preslice<MyV0Photons> perCollision_pcm = aod::v0photonkf::pmeventId;
 
   template <PairType pairtype, typename TG1, typename TG2, typename TCut1, typename TCut2>
   bool IsSelectedPair(TG1 const& g1, TG2 const& g2, TCut1 const& tagcut, TCut2 const& probecut)
@@ -286,7 +293,7 @@ struct MaterialBudgetMC {
           value[1] = photon.v0radius();
           value[2] = RecoDecay::constrainAngle(phi_cp);
           value[3] = eta_cp;
-          reinterpret_cast<THnSparseF*>(list_v0->FindObject(cut.GetName())->FindObject("hs_conv_point"))->Fill(value);
+          reinterpret_cast<THnSparseF*>(list_v0->FindObject(cut.getName().c_str())->FindObject("hs_conv_point"))->Fill(value);
 
         } // end of photon loop
       } // end of cut loop
@@ -379,7 +386,7 @@ struct MaterialBudgetMC {
                 value[3] = g2.v0radius();
                 value[4] = RecoDecay::constrainAngle(phi_cp2);
                 value[5] = eta_cp2;
-                reinterpret_cast<THnSparseF*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.GetName(), probecut.GetName()))->FindObject(paircut.GetName())->FindObject("hs_conv_point_same"))->Fill(value);
+                reinterpret_cast<THnSparseF*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.getName().c_str(), probecut.getName().c_str()))->FindObject(paircut.getName().c_str())->FindObject("hs_conv_point_same"))->Fill(value);
               } // end of pair cut loop
             } // end of g2 loop
           } // end of g1 loop

@@ -22,38 +22,50 @@
 // **************************
 
 // runme like: o2-analysis-trackselection -b --aod-file ${sourceFile} --aod-writer-json ${writerFile} | o2-analysis-timestamp -b | o2-analysis-trackextension -b | o2-analysis-lf-lambdakzerobuilder -b | o2-analysis-pid-tpc -b | o2-analysis-em-skimmermc -b
-
-#include <map>
-#include <memory>
-#include <string>
-#include <vector>
-
 // todo: remove reduantant information in GammaConversionsInfoTrue
+
 #include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
 #include "PWGEM/PhotonMeson/Utils/PCMUtilities.h"
 #include "PWGEM/PhotonMeson/Utils/gammaConvDefinitions.h"
 #include "PWGLF/DataModel/LFStrangenessTables.h"
 
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-
-// includes for the R recalculation
-#include "Common/Core/trackUtilities.h"
+#include "Common/Core/RecoDecay.h"
+#include "Common/DataModel/PIDResponseTPC.h"
+#include "Common/DataModel/TrackSelectionTables.h"
 #include "Tools/KFparticle/KFUtilities.h"
 
-#include "CCDB/BasicCCDBManager.h"
-#include "CommonConstants/PhysicsConstants.h"
-#include "ReconstructionDataFormats/HelixHelper.h"
-#include "DataFormatsParameters/GRPMagField.h"
-#include "DataFormatsParameters/GRPObject.h"
-#include "DetectorsBase/GeometryManager.h"
-#include "DetectorsBase/Propagator.h"
-#include "ReconstructionDataFormats/TrackFwd.h"
+#include <CCDB/BasicCCDBManager.h>
+#include <CommonConstants/PhysicsConstants.h>
+#include <DataFormatsParameters/GRPMagField.h>
+#include <DataFormatsParameters/GRPObject.h>
+#include <DetectorsBase/MatLayerCylSet.h>
+#include <DetectorsBase/Propagator.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Concepts.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/runDataProcessing.h>
 
-#include "Math/Vector4D.h"
-#include <TMath.h>
-#include <TVector2.h>
+#include <Math/Vector4D.h> // IWYU pragma: keep (do not replace with Math/Vector4Dfwd.h)
+#include <Math/Vector4Dfwd.h>
+#include <TAxis.h>
+#include <TH1.h>
+
+#include <KFPTrack.h>
+#include <KFPVertex.h>
+#include <KFParticle.h>
+
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -94,7 +106,7 @@ struct skimmerGammaConversion {
   };
 
   // declare this here in order to be able to access it from a lambda
-  std::shared_ptr<TH1> fMotherSizesHisto{};
+  std::shared_ptr<TH1> fMotherSizesHisto;
 
   enum eV0Confirmation {
     kV0In,
@@ -121,7 +133,7 @@ struct skimmerGammaConversion {
   Produces<aod::V0DaughterMcParticles> fFuncTableMCTrackInformation;
   Produces<aod::MCParticleIndex> fIndexTableMCTrackIndex;
 
-  Service<o2::ccdb::BasicCCDBManager> ccdb;
+  Service<o2::ccdb::BasicCCDBManager> ccdb{};
 
   int runNumber = -1;
   o2::base::MatLayerCylSet* lut = nullptr;
@@ -156,7 +168,7 @@ struct skimmerGammaConversion {
     }
 
     auto run3grp_timestamp = bc.timestamp();
-    o2::parameters::GRPObject* grpo = ccdb->getForTimeStamp<o2::parameters::GRPObject>(ccdbPath, run3grp_timestamp);
+    auto* grpo = ccdb->getForTimeStamp<o2::parameters::GRPObject>(ccdbPath, run3grp_timestamp);
     o2::parameters::GRPMagField* grpmag = nullptr;
 
     if (grpo) {
@@ -179,7 +191,7 @@ struct skimmerGammaConversion {
     KFParticle::SetField(magneticField);
   }
 
-  template <typename TTRACK, typename TKFP>
+  template <o2::soa::is_iterator TTRACK, typename TKFP>
   void fillTrackTable(TTRACK const& theTrack, TKFP const& kfp)
   {
     v0legs(theTrack.collisionId(),
@@ -191,8 +203,8 @@ struct skimmerGammaConversion {
            theTrack.itsClusterSizes(), theTrack.itsChi2NCl(), theTrack.detectorMap());
   }
 
-  template <typename TTRACK>
-  void fillfFuncTableMCTrackInformation(TTRACK theTrack, bool sameMother)
+  template <o2::soa::is_iterator TTRACK>
+  void fillfFuncTableMCTrackInformation(TTRACK const& theTrack, bool sameMother)
   {
     fFuncTableMCTrackInformation(
       theTrack.mcParticle().pdgCode(),
@@ -202,7 +214,7 @@ struct skimmerGammaConversion {
       sameMother);
   }
 
-  template <typename TTrack>
+  template <o2::soa::is_iterator TTrack>
   bool checkV0leg(TTrack const& track)
   {
     if (track.pt() < minpt || abs(track.eta()) > maxeta) {
@@ -226,24 +238,24 @@ struct skimmerGammaConversion {
     return true;
   }
 
-  template <typename TTrack, typename TCollision, typename TV0>
+  template <o2::soa::is_table TTrack, o2::soa::is_iterator TCollision, o2::soa::is_iterator TV0>
   void fillV0KF(TCollision const& collision, TV0 const& v0)
   {
     auto pos = v0.template posTrack_as<TTrack>(); // positive daughter
     auto ele = v0.template negTrack_as<TTrack>(); // negative daughter
 
-    float xyz[3] = {0.f, 0.f, 0.f};
+    std::array<float, 3> xyz = {0.f, 0.f, 0.f};
     Vtx_recalculation(o2::base::Propagator::Instance(), pos, ele, xyz);
 
     KFPTrack kfp_track_pos = createKFPTrackFromTrack(pos);
     KFPTrack kfp_track_ele = createKFPTrackFromTrack(ele);
     KFParticle kfp_pos(kfp_track_pos, -11);
     KFParticle kfp_ele(kfp_track_ele, 11);
-    const KFParticle* GammaDaughters[2] = {&kfp_pos, &kfp_ele};
+    std::array<const KFParticle*, 2> GammaDaughters = {&kfp_pos, &kfp_ele};
 
     KFParticle gammaKF;
     gammaKF.SetConstructMethod(2);
-    gammaKF.Construct(GammaDaughters, 2);
+    gammaKF.Construct(GammaDaughters.data(), 2);
     if (kfMassConstrain > -0.1) {
       gammaKF.SetNonlinearMassConstraint(kfMassConstrain);
     }
@@ -255,7 +267,7 @@ struct skimmerGammaConversion {
 
     // Transport the gamma to the recalculated decay vertex
     KFParticle gammaKF_DecayVtx = gammaKF; // with respect to (0,0,0)
-    gammaKF_DecayVtx.TransportToPoint(xyz);
+    gammaKF_DecayVtx.TransportToPoint(xyz.data());
 
     //// Apply a topological constraint of the gamma to the PV. Parameters will be given at the primary vertex.
     // KFParticle gammaKF_PV = gammaKF_DecayVtx;
@@ -268,8 +280,8 @@ struct skimmerGammaConversion {
 
     KFParticle kfp_pos_DecayVtx = kfp_pos;
     KFParticle kfp_ele_DecayVtx = kfp_ele;
-    kfp_pos_DecayVtx.TransportToPoint(xyz);
-    kfp_ele_DecayVtx.TransportToPoint(xyz);
+    kfp_pos_DecayVtx.TransportToPoint(xyz.data());
+    kfp_ele_DecayVtx.TransportToPoint(xyz.data());
 
     // KFParticle kfp_pos_PV = kfp_pos_DecayVtx;
     // KFParticle kfp_ele_PV = kfp_ele_DecayVtx;
@@ -397,7 +409,7 @@ struct skimmerGammaConversion {
   }
   PROCESS_SWITCH(skimmerGammaConversion, processMc, "process reconstructed and mc info ", false);
 
-  template <typename TV0, typename TTRACK>
+  template <o2::soa::is_iterator TV0, o2::soa::is_iterator TTRACK>
   eV0Confirmation isTrueV0(TV0 const& /*theV0*/,
                            TTRACK const& theTrackPos,
                            TTRACK const& theTrackNeg)
@@ -506,7 +518,7 @@ struct skimmerGammaConversion {
   }
 };
 
-WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
+WorkflowSpec defineDataProcessing(ConfigContext const& context)
 {
-  return WorkflowSpec{adaptAnalysisTask<skimmerGammaConversion>(cfgc, TaskName{"skimmer-gamma-conversion"})};
+  return WorkflowSpec{adaptAnalysisTask<skimmerGammaConversion>(context, TaskName{"skimmer-gamma-conversion"})};
 }

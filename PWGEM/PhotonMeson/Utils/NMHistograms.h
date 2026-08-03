@@ -18,6 +18,9 @@
 
 #include "PWGEM/PhotonMeson/Utils/MCUtilities.h"
 
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/ASoA.h>
+#include <Framework/Concepts.h>
 #include <Framework/HistogramRegistry.h>
 #include <Framework/HistogramSpec.h>
 
@@ -34,6 +37,7 @@ inline void addNMHistograms(o2::framework::HistogramRegistry* fRegistry, bool is
 {
   // !!Don't change pt,eta,y binning. These binnings have to be consistent with binned data at skimming.!!
   std::vector<double> ptbins;
+  ptbins.reserve(72);
   for (int i = 0; i < 2; i++) {                // o2-linter: disable=magic-number (just numbers for binning)
     ptbins.emplace_back(0.05 * (i - 0) + 0.0); // from 0 to 0.05 GeV/c, every 0.05 GeV/c
   }
@@ -50,18 +54,18 @@ inline void addNMHistograms(o2::framework::HistogramRegistry* fRegistry, bool is
   const o2::framework::AxisSpec axis_mass{400, 0, 0.8, Form("m_{%s} (GeV/c^{2})", pairname)};
 
   if (isMC) {
-    fRegistry->add("Pair/Pi0/hs_Primary", "rec. true pi0", o2::framework::kTHnSparseD, {axis_mass, axis_pt}, true);
-    fRegistry->add("Pair/Pi0/hs_FromWD", "rec. true pi0 from weak decay", o2::framework::kTHnSparseD, {axis_mass, axis_pt}, true);
-    fRegistry->add("Pair/Pi0/hs_FromHS", "rec. true pi0 from hadronic shower in material", o2::framework::kTHnSparseD, {axis_mass, axis_pt}, true);
-    fRegistry->add("Pair/Pi0/hs_FromSameGamma", "Two clusters from same gamma that is a pi0 daughter (conversion)", o2::framework::kTHnSparseD, {axis_mass, axis_pt}, true);
-    fRegistry->add("Pair/Eta/hs_Primary", "rec. true eta", o2::framework::kTHnSparseD, {axis_mass, axis_pt}, true);
-    fRegistry->add("Pair/Eta/hs_FromWD", "rec. true eta from weak decay", o2::framework::kTHnSparseD, {axis_mass, axis_pt}, true);
-    fRegistry->add("Pair/Eta/hs_FromHS", "rec. true eta from hadronic shower in material", o2::framework::kTHnSparseD, {axis_mass, axis_pt}, true);
-    fRegistry->add("Pair/Eta/hs_FromSameGamma", "Two clusters from same gamma that is a eta daughter (conversion)", o2::framework::kTHnSparseD, {axis_mass, axis_pt}, true);
+    fRegistry->add("Pair/Pi0/hs_Primary", "rec. true pi0", o2::framework::HistType::kTHnSparseD, {axis_mass, axis_pt}, true);
+    fRegistry->add("Pair/Pi0/hs_FromWD", "rec. true pi0 from weak decay", o2::framework::HistType::kTHnSparseD, {axis_mass, axis_pt}, true);
+    fRegistry->add("Pair/Pi0/hs_FromHS", "rec. true pi0 from hadronic shower in material", o2::framework::HistType::kTHnSparseD, {axis_mass, axis_pt}, true);
+    fRegistry->add("Pair/Pi0/hs_FromSameGamma", "Two clusters from same gamma that is a pi0 daughter (conversion)", o2::framework::HistType::kTHnSparseD, {axis_mass, axis_pt}, true);
+    fRegistry->add("Pair/Eta/hs_Primary", "rec. true eta", o2::framework::HistType::kTHnSparseD, {axis_mass, axis_pt}, true);
+    fRegistry->add("Pair/Eta/hs_FromWD", "rec. true eta from weak decay", o2::framework::HistType::kTHnSparseD, {axis_mass, axis_pt}, true);
+    fRegistry->add("Pair/Eta/hs_FromHS", "rec. true eta from hadronic shower in material", o2::framework::HistType::kTHnSparseD, {axis_mass, axis_pt}, true);
+    fRegistry->add("Pair/Eta/hs_FromSameGamma", "Two clusters from same gamma that is a eta daughter (conversion)", o2::framework::HistType::kTHnSparseD, {axis_mass, axis_pt}, true);
 
     const o2::framework::AxisSpec axis_rapidity{{0.0, +0.8, +0.9}, "rapidity |y|"};
-    fRegistry->add("Generated/Pi0/hPt", "pT;p_{T} (GeV/c)", o2::framework::kTH1F, {axis_pt}, true);
-    fRegistry->add("Generated/Pi0/hPtY", "Generated info", o2::framework::kTH2F, {axis_pt, axis_rapidity}, true);
+    fRegistry->add("Generated/Pi0/hPt", "pT;p_{T} (GeV/c)", o2::framework::HistType::kTH1D, {axis_pt}, true);
+    fRegistry->add("Generated/Pi0/hPtY", "Generated info", o2::framework::HistType::kTH2D, {axis_pt, axis_rapidity}, true);
     fRegistry->addClone("Generated/Pi0/", "Generated/Eta/");
 
     fRegistry->get<TH1>(HIST("Generated/Pi0/hPt"))->SetXTitle("p_{T} (GeV/c)");
@@ -71,24 +75,24 @@ inline void addNMHistograms(o2::framework::HistogramRegistry* fRegistry, bool is
     fRegistry->get<TH2>(HIST("Generated/Eta/hPtY"))->SetXTitle("p_{T} (GeV/c)");
     fRegistry->get<TH2>(HIST("Generated/Eta/hPtY"))->SetYTitle("rapidity |y|");
   } else {
-    fRegistry->add("Pair/same/hs", "diphoton", o2::framework::kTHnSparseD, {axis_mass, axis_pt}, true);
+    fRegistry->add("Pair/same/hs", "diphoton", o2::framework::HistType::kTHnSparseD, {axis_mass, axis_pt}, true);
     fRegistry->addClone("Pair/same/", "Pair/mix/");
   }
 }
 
-template <typename TDiphoton, typename TMCParitlce, typename TMCParticles, typename TMCCollisions>
+template <typename TDiphoton, o2::soa::is_iterator TMCParitlce, o2::soa::is_table TMCParticles, o2::soa::is_table TMCCollisions>
 void fillTruePairInfo(o2::framework::HistogramRegistry* fRegistry, TDiphoton const& v12, TMCParitlce const& mcparticle, TMCParticles const& mcparticles, TMCCollisions const&, const TF1* f1fd_k0s_to_pi0 = nullptr, float eventWeight = 1.f)
 {
   int pdg = std::abs(mcparticle.pdgCode());
   float weight = eventWeight;
   int motherid_strhad = o2::aod::pwgem::photonmeson::utils::mcutil::IsFromWD(mcparticle.template emmcevent_as<TMCCollisions>(), mcparticle, mcparticles);
   switch (pdg) {
-    case kPi0: {
+    case PDG_t::kPi0: {
       if (mcparticle.isPhysicalPrimary() || mcparticle.producedByGenerator()) {
         fRegistry->fill(HIST("Pair/Pi0/hs_Primary"), v12.M(), v12.Pt(), weight);
       } else if (motherid_strhad > 0) {
         auto str_had = mcparticles.iteratorAt(motherid_strhad);
-        if (std::abs(str_had.pdgCode()) == kK0Short && f1fd_k0s_to_pi0 != nullptr) {
+        if (std::abs(str_had.pdgCode()) == PDG_t::kK0Short && f1fd_k0s_to_pi0 != nullptr) {
           weight *= f1fd_k0s_to_pi0->Eval(str_had.pt());
         }
         fRegistry->fill(HIST("Pair/Pi0/hs_FromWD"), v12.M(), v12.Pt(), weight);
@@ -97,7 +101,7 @@ void fillTruePairInfo(o2::framework::HistogramRegistry* fRegistry, TDiphoton con
       }
       break;
     }
-    case 221: {
+    case constants::physics::kEta: {
       if (mcparticle.isPhysicalPrimary() || mcparticle.producedByGenerator()) {
         fRegistry->fill(HIST("Pair/Eta/hs_Primary"), v12.M(), v12.Pt(), weight);
       } else if (motherid_strhad > 0) {

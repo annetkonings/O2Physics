@@ -17,22 +17,22 @@
 #include "PWGEM/PhotonMeson/Core/CutsLibrary.h"
 #include "PWGEM/PhotonMeson/Core/HistogramsLibrary.h"
 #include "PWGEM/PhotonMeson/Core/PHOSPhotonCut.h"
+#include "PWGEM/PhotonMeson/DataModel/EventTables.h"
 #include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
 
 #include "Common/CCDB/TriggerAliases.h"
 
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
+#include <Framework/AnalysisDataModel.h>
 #include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
 #include <Framework/Configurable.h>
 #include <Framework/InitContext.h>
+#include <Framework/runDataProcessing.h>
 
 #include <THashList.h>
-#include <TString.h>
 
 #include <cstdlib>
-#include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -44,7 +44,7 @@ using namespace o2::framework::expressions;
 using namespace o2::soa;
 using namespace o2::aod::pwgem::photon;
 
-using MyCollisions = soa::Join<aod::EMEvents, aod::EMEventsAlias, aod::EMEventsMult, aod::EMEventsCent>;
+using MyCollisions = soa::Join<aod::PMEvents, aod::EMEventsAlias, aod::EMEventsMult_000, aod::EMEventsCent_000>;
 using MyCollision = MyCollisions::iterator;
 
 struct phosQC {
@@ -71,28 +71,31 @@ struct phosQC {
     THashList* list_cluster = reinterpret_cast<THashList*>(fMainList->FindObject("Cluster"));
 
     for (const auto& cut : fPHOSCuts) {
-      const char* cutname = cut.GetName();
-      o2::aod::pwgem::photon::histogram::AddHistClass(list_cluster, cutname);
+      std::string cutname = cut.getName();
+      o2::aod::pwgem::photon::histogram::AddHistClass(list_cluster, cutname.c_str());
     }
 
     // for Clusters
     for (auto& cut : fPHOSCuts) {
-      std::string_view cutname = cut.GetName();
-      THashList* list = reinterpret_cast<THashList*>(fMainList->FindObject("Cluster")->FindObject(cutname.data()));
+      std::string cutname = cut.getName();
+      THashList* list = reinterpret_cast<THashList*>(fMainList->FindObject("Cluster")->FindObject(cutname.c_str()));
       o2::aod::pwgem::photon::histogram::DefineHistograms(list, "Cluster", "PHOS");
     }
   }
 
   void DefineCuts()
   {
-    TString cutNamesStr = fConfigPHOSCuts.value;
-    if (!cutNamesStr.IsNull()) {
-      std::unique_ptr<TObjArray> objArray(cutNamesStr.Tokenize(","));
-      for (int icut = 0; icut < objArray->GetEntries(); ++icut) {
-        const char* cutname = objArray->At(icut)->GetName();
-        LOGF(info, "add cut : %s", cutname);
-        fPHOSCuts.push_back(*phoscuts::GetCut(cutname));
-      }
+    if (fConfigPHOSCuts.value.empty()) {
+      return;
+    }
+
+    std::string_view namesView(fConfigPHOSCuts.value);
+
+    for (auto name : namesView | std::views::split(',')) {
+      std::string cutString(name.begin(), name.end());
+      const char* cutname = cutString.c_str();
+      LOGF(info, "add PHOS cut : %s", cutname);
+      fPHOSCuts.push_back(*phoscuts::GetCut(cutname));
     }
     LOGF(info, "Number of PHOS cuts = %d", fPHOSCuts.size());
   }
@@ -139,7 +142,7 @@ struct phosQC {
 
       auto clusters_per_coll = clusters.sliceBy(perCollision, collision.collisionId());
       for (const auto& cut : fPHOSCuts) {
-        THashList* list_cluster_cut = static_cast<THashList*>(list_cluster->FindObject(cut.GetName()));
+        THashList* list_cluster_cut = static_cast<THashList*>(list_cluster->FindObject(cut.getName().c_str()));
         int ng = 0;
         for (auto& cluster : clusters_per_coll) {
 
@@ -148,7 +151,7 @@ struct phosQC {
             ng++;
           }
         } // end of v0 loop
-        reinterpret_cast<TH1F*>(fMainList->FindObject("Cluster")->FindObject(cut.GetName())->FindObject("hNgamma"))->Fill(ng);
+        reinterpret_cast<TH1F*>(fMainList->FindObject("Cluster")->FindObject(cut.getName().c_str())->FindObject("hNgamma"))->Fill(ng);
       } // end of cut loop
     } // end of collision loop
   } // end of process

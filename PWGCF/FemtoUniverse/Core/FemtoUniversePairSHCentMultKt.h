@@ -16,16 +16,25 @@
 #ifndef PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEPAIRSHCENTMULTKT_H_
 #define PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSEPAIRSHCENTMULTKT_H_
 
+#include "PWGCF/FemtoUniverse/Core/FemtoUniverseMath.h"
 #include "PWGCF/FemtoUniverse/Core/FemtoUniverseSHContainer.h"
+#include "PWGCF/FemtoUniverse/Core/FemtoUniverseSpherHarMath.h"
 
-#include "Framework/HistogramRegistry.h"
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
 
+#include <TH1.h>
+#include <TH3.h>
+#include <TString.h>
+
+#include <array>
+#include <cmath>
 #include <complex>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
-
-// using namespace o2::constants::physics;
 
 namespace o2::analysis::femto_universe
 {
@@ -50,11 +59,11 @@ class PairSHCentMultKt
   /// \param ktbins Number of kT bins
   /// \param maxl Maximum valie of L component of the spherical harmonics
   template <typename t1>
-  void init(HistogramRegistry* registry, t1& kstarbins, t1& centmultbins,
+  void init(framework::HistogramRegistry* registry, t1& kstarbins, t1& centmultbins,
             t1& ktbins, bool isqinvfill, int /*maxl*/)
   {
     pairSHCentMultKtRegistry = registry;
-    AxisSpec kstarAxis = {kstarbins, "#it{k*} (GeV/#it{c})"};
+    framework::AxisSpec kstarAxis = {kstarbins, "#it{k*} (GeV/#it{c})"};
     kStarBins = kstarbins;
 
     centMultBins = centmultbins;
@@ -74,7 +83,6 @@ class PairSHCentMultKt
     int em = 0;
     int il = 0;
     do {
-
       fels[il] = el;
       fems[il] = em;
       felsi[il] = static_cast<int>(el);
@@ -124,23 +132,23 @@ class PairSHCentMultKt
           if (FolderSuffix[EventType] == FolderSuffix[0]) {
             fnumsreal[i][j][ihist] = pairSHCentMultKtRegistry->add<TH1>(
               (histFolderMult + "/" + histFolderkT + "/" + "NumRe" + suffix).c_str(),
-              ("; " + femtoObs1D + "; Entries").c_str(), kTH1D, {femtoObsAxis1D});
+              ("; " + femtoObs1D + "; Entries").c_str(), framework::kTH1D, {femtoObsAxis1D});
             fnumsimag[i][j][ihist] = pairSHCentMultKtRegistry->add<TH1>(
               (histFolderMult + "/" + histFolderkT + "/" + "NumIm" + suffix).c_str(),
-              ("; " + femtoObs1D + "; Entries").c_str(), kTH1D, {femtoObsAxis1D});
+              ("; " + femtoObs1D + "; Entries").c_str(), framework::kTH1D, {femtoObsAxis1D});
           } else {
             fdensreal[i][j][ihist] = pairSHCentMultKtRegistry->add<TH1>(
               (histFolderMult + "/" + histFolderkT + "/" + "DenRe" + suffix).c_str(),
-              ("; " + femtoObs1D + "; Entries").c_str(), kTH1D, {femtoObsAxis1D});
+              ("; " + femtoObs1D + "; Entries").c_str(), framework::kTH1D, {femtoObsAxis1D});
             fdensimag[i][j][ihist] = pairSHCentMultKtRegistry->add<TH1>(
               (histFolderMult + "/" + histFolderkT + "/" + "DenIm" + suffix).c_str(),
-              ("; " + femtoObs1D + "; Entries").c_str(), kTH1D, {femtoObsAxis1D});
+              ("; " + femtoObs1D + "; Entries").c_str(), framework::kTH1D, {femtoObsAxis1D});
           }
         }
 
         if (FolderSuffix[EventType] == FolderSuffix[0]) {
           std::string bufnameNum = "CovNum";
-          fcovnum[i][j] = pairSHCentMultKtRegistry->add<TH3>((histFolderMult + "/" + histFolderkT + "/" + bufnameNum).c_str(), "; x; y; z", kTH3D,
+          fcovnum[i][j] = pairSHCentMultKtRegistry->add<TH3>((histFolderMult + "/" + histFolderkT + "/" + bufnameNum).c_str(), "; x; y; z", framework::kTH3D,
                                                              {{kstarbins},
                                                               {(kMaxJM * 2), -0.5, ((static_cast<float>(kMaxJM) * 2.0 - 0.5))},
                                                               {(kMaxJM * 2), -0.5,
@@ -148,7 +156,7 @@ class PairSHCentMultKt
           fcovnum[i][j]->Sumw2();
         } else if (FolderSuffix[EventType] == FolderSuffix[1]) {
           std::string bufnameDen = "CovDen";
-          fcovden[i][j] = pairSHCentMultKtRegistry->add<TH3>((histFolderMult + "/" + histFolderkT + "/" + bufnameDen).c_str(), "; x; y; z", kTH3D,
+          fcovden[i][j] = pairSHCentMultKtRegistry->add<TH3>((histFolderMult + "/" + histFolderkT + "/" + bufnameDen).c_str(), "; x; y; z", framework::kTH3D,
                                                              {{kstarbins},
                                                               {(kMaxJM * 2), -0.5, ((static_cast<float>(kMaxJM) * 2.0 - 0.5))},
                                                               {(kMaxJM * 2), -0.5,
@@ -159,13 +167,13 @@ class PairSHCentMultKt
             std::string bufnameNum = "h1DNum";
             fnums1D[i][j] = pairSHCentMultKtRegistry->add<TH1>(
               (histFolderMult + "/" + histFolderkT + "/" + bufnameNum).c_str(),
-              ("; " + femtoObs1D + "; Entries").c_str(), kTH1D, {femtoObsAxis1D});
+              ("; " + femtoObs1D + "; Entries").c_str(), framework::kTH1D, {femtoObsAxis1D});
             fnums1D[i][j]->Sumw2();
           } else if (FolderSuffix[EventType] == FolderSuffix[1]) {
             std::string bufnameNum = "h1DDen";
             fdens1D[i][j] = pairSHCentMultKtRegistry->add<TH1>(
               (histFolderMult + "/" + histFolderkT + "/" + bufnameNum).c_str(),
-              ("; " + femtoObs1D + "; Entries").c_str(), kTH1D, {femtoObsAxis1D});
+              ("; " + femtoObs1D + "; Entries").c_str(), framework::kTH1D, {femtoObsAxis1D});
             fdens1D[i][j]->Sumw2();
           }
         }
@@ -180,7 +188,7 @@ class PairSHCentMultKt
   /// \param ktval kT value
   template <typename T>
   void fillMultNumDen(T const& part1, T const& part2, uint8_t ChosenEventType,
-                      int maxl, int multval, float ktval, bool isiden, bool isqinvfill)
+                      int maxl, int multval, float ktval, bool isIdenLCMS, bool isqinvfill, bool isWeight, bool isIdenPRF)
   {
     int multbinval;
     int absmultval = multval;
@@ -197,7 +205,7 @@ class PairSHCentMultKt
       return;
     }
     // std::cout<<"multbinval "<<multbinval<<std::endl;
-    fillkTNumDen(part1, part2, ChosenEventType, maxl, multbinval, ktval, isiden, isqinvfill);
+    fillkTNumDen(part1, part2, ChosenEventType, maxl, multbinval, ktval, isIdenLCMS, isqinvfill, isWeight, isIdenPRF);
   }
 
   /// Templated function to access different kT directory and call addEventPair
@@ -209,7 +217,7 @@ class PairSHCentMultKt
   /// \param ktval kT value
   template <typename T>
   void fillkTNumDen(T const& part1, T const& part2, uint8_t ChosenEventType,
-                    int maxl, int multval, float ktval, bool isiden, bool isqinvfill)
+                    int maxl, int multval, float ktval, bool isIdenLCMS, bool isqinvfill, bool isWeight, bool isIdenPRF)
   {
     int ktbinval = -1;
     if (ktval >= ktBins[0] && ktval < ktBins[1]) {
@@ -229,16 +237,16 @@ class PairSHCentMultKt
     } else {
       return;
     }
-    addEventPair(part1, part2, ChosenEventType, maxl, multval, ktbinval, isiden, isqinvfill);
+    addEventPair(part1, part2, ChosenEventType, maxl, multval, ktbinval, isIdenLCMS, isqinvfill, isWeight, isIdenPRF);
   }
 
   /// Set the PDG codes of the two particles involved
   /// \param pdg1 PDG code of particle one
   /// \param pdg2 PDG code of particle two
-  void setPionPairMass()
+  void setPairMass(const float mass1, const float mass2)
   {
-    mMassOne = o2::constants::physics::MassPiPlus; // FIXME: Get from the PDG service of the common header
-    mMassTwo = o2::constants::physics::MassPiPlus; // FIXME: Get from the PDG service of the common header
+    mMassOne = mass1;
+    mMassTwo = mass2;
   }
 
   /// To compute the bin value for cavariance matrix
@@ -262,20 +270,31 @@ class PairSHCentMultKt
   /// \param ktval kT value
   template <typename T>
   void addEventPair(T const& part1, T const& part2, uint8_t ChosenEventType,
-                    int /*maxl*/, int multval, int ktval, bool isiden, bool isqinvfill)
+                    int /*maxl*/, int multval, int ktval, bool isIdenLCMS, bool isqinvfill, bool isWeight, bool isIdenPRF)
   {
     int fMultBin = multval;
     int fKtBin = ktval;
     std::vector<std::complex<double>> fYlmBuffer(kMaxJM);
     std::vector<double> f3d;
-    setPionPairMass();
-    f3d = FemtoUniverseMath::newpairfunc(part1, mMassOne, part2, mMassTwo,
-                                         isiden);
 
-    const float qout = f3d[1];
-    const float qside = f3d[2];
-    const float qlong = f3d[3];
+    f3d = FemtoUniverseMath::newpairfunc(part1, mMassOne, part2, mMassTwo, isIdenLCMS, isWeight, isIdenPRF);
+    double varout = 0.0;
+    double varside = 0.0;
+    double varlong = 0.0;
 
+    if (isIdenLCMS) {
+      varout = f3d[1];
+      varside = f3d[2];
+      varlong = f3d[3];
+    } else if (isIdenPRF) {
+      varout = f3d[6];
+      varside = f3d[7];
+      varlong = f3d[8];
+    }
+
+    const double qout = varout;
+    const double qside = varside;
+    const double qlong = varlong;
     double kv = std::sqrt(qout * qout + qside * qside + qlong * qlong);
 
     // int nqbin = fbinctn[0][0]->GetXaxis()->FindFixBin(kv);
@@ -399,7 +418,7 @@ class PairSHCentMultKt
   std::array<std::array<std::shared_ptr<TH3>, 7>, 4> fcovden{};
 
  protected:
-  HistogramRegistry* pairSHCentMultKtRegistry = nullptr;
+  framework::HistogramRegistry* pairSHCentMultKtRegistry = nullptr;
   static constexpr std::string_view FolderSuffix[2] = {"SameEvent", "MixedEvent"}; ///< Folder naming for the output according to EventType
   static constexpr int EventType = eventType;                                      ///< Type of the event (same/mixed, according to FEMTOUNIVERSESHCONTAINER::EventType)
   float mMassOne = 0.f;                                                            ///< PDG mass of particle 1

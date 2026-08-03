@@ -23,48 +23,47 @@
 #include "PWGCF/Femto/Core/trackHistManager.h"
 #include "PWGCF/Femto/DataModel/FemtoTables.h"
 
-#include "Framework/ASoA.h"
-#include "Framework/AnalysisHelpers.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/Configurable.h"
-#include "Framework/Expressions.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/InitContext.h"
-#include "Framework/OutputObjHeader.h"
-#include "Framework/runDataProcessing.h"
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/Expressions.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
 
 #include <map>
-#include <string>
 #include <vector>
 
-using namespace o2::aod;
-using namespace o2::framework;
-using namespace o2::framework::expressions;
 using namespace o2::analysis::femto;
 
 struct FemtoCascadeQa {
 
-  using FemtoCollisions = o2::soa::Join<FCols, FColMasks, FColPos, FColSphericities, FColMults>;
+  using FemtoCollisions = o2::soa::Join<o2::aod::FCols, o2::aod::FColMasks, o2::aod::FColPos, o2::aod::FColSphericities, o2::aod::FColMults>;
   using FilteredFemtoCollisions = o2::soa::Filtered<FemtoCollisions>;
   using FilteredFemtoCollision = FilteredFemtoCollisions::iterator;
 
-  using FemtoCollisionsWithLabel = o2::soa::Join<FemtoCollisions, FColLabels>;
+  using FemtoCollisionsWithLabel = o2::soa::Join<FemtoCollisions, o2::aod::FColLabels>;
   using FilteredFemtoCollisionsWithLabel = o2::soa::Filtered<FemtoCollisionsWithLabel>;
   using FilteredFemtoCollisionWithLabel = FilteredFemtoCollisionsWithLabel::iterator;
 
-  using FemtoXis = o2::soa::Join<FXis, FXiMasks, FXiExtras>;
-  using FemtoOmegas = o2::soa::Join<FOmegas, FOmegaMasks, FOmegaExtras>;
-  using FemtoTracks = o2::soa::Join<FTracks, FTrackDcas, FTrackExtras, FTrackPids>;
+  using FemtoXis = o2::soa::Join<o2::aod::FXis, o2::aod::FXiMasks, o2::aod::FXiExtras>;
+  using FemtoOmegas = o2::soa::Join<o2::aod::FOmegas, o2::aod::FOmegaMasks, o2::aod::FOmegaExtras>;
+  using FemtoTracks = o2::soa::Join<o2::aod::FTracks, o2::aod::FTrackMass, o2::aod::FTrackDcas, o2::aod::FTrackExtras, o2::aod::FTrackPids>;
 
-  using FemtoXisWithLabel = o2::soa::Join<FemtoXis, FXiLabels>;
-  using FemtoOmegasWithLabel = o2::soa::Join<FemtoOmegas, FOmegaLabels>;
-  using FemtoTracksWithLabel = o2::soa::Join<FemtoTracks, FTrackLabels>;
+  using FemtoXisWithLabel = o2::soa::Join<FemtoXis, o2::aod::FXiLabels>;
+  using FemtoOmegasWithLabel = o2::soa::Join<FemtoOmegas, o2::aod::FOmegaLabels>;
+  using FemtoTracksWithLabel = o2::soa::Join<FemtoTracks, o2::aod::FTrackLabels>;
 
-  SliceCache cache;
+  using FemtoMcParticlesWithLabel = o2::soa::Join<o2::aod::FMcParticles, o2::aod::FMcMotherLabels>;
+
+  o2::framework::SliceCache cache;
 
   // setup collisions
   collisionbuilder::ConfCollisionSelection collisionSelection;
-  Filter collisionFilter = MAKE_COLLISION_FILTER(collisionSelection);
+  o2::framework::expressions::Filter collisionFilter = MAKE_COLLISION_FILTER(collisionSelection);
   colhistmanager::CollisionHistManager colHistManager;
   colhistmanager::ConfCollisionBinning confCollisionBinning;
   colhistmanager::ConfCollisionQaBinning confCollisionQaBinning;
@@ -75,11 +74,11 @@ struct FemtoCascadeQa {
   particlecleaner::ConfXiCleaner1 confXiCleaner;
   particlecleaner::ParticleCleaner xiCleaner;
 
-  Partition<FemtoXis> xiPartition = MAKE_CASCADE_PARTITION(confXiSelection);
-  Preslice<FemtoXis> preColXis = femtobase::stored::fColId;
+  o2::framework::Partition<FemtoXis> xiPartition = MAKE_CASCADE_PARTITION(confXiSelection);
+  o2::framework::Preslice<FemtoXis> preColXis = o2::aod::femtobase::stored::fColId;
 
-  Partition<FemtoXisWithLabel> xiWithLabelPartition = MAKE_CASCADE_PARTITION(confXiSelection);
-  Preslice<FemtoXisWithLabel> perColXisWithLabel = femtobase::stored::fColId;
+  o2::framework::Partition<FemtoXisWithLabel> xiWithLabelPartition = MAKE_CASCADE_PARTITION(confXiSelection);
+  o2::framework::Preslice<FemtoXisWithLabel> perColXisWithLabel = o2::aod::femtobase::stored::fColId;
 
   cascadehistmanager::ConfXiBinning confXiBinning;
   cascadehistmanager::ConfXiQaBinning confXiQaBinning;
@@ -97,11 +96,11 @@ struct FemtoCascadeQa {
   particlecleaner::ConfOmegaCleaner1 confOmegaCleaner;
   particlecleaner::ParticleCleaner omegaCleaner;
 
-  Partition<FemtoOmegas> omegaPartition = MAKE_CASCADE_PARTITION(confOmegaSelection);
-  Preslice<FemtoOmegas> preColOmegas = femtobase::stored::fColId;
+  o2::framework::Partition<FemtoOmegas> omegaPartition = MAKE_CASCADE_PARTITION(confOmegaSelection);
+  o2::framework::Preslice<FemtoOmegas> preColOmegas = o2::aod::femtobase::stored::fColId;
 
-  Partition<FemtoOmegasWithLabel> omegaWithLabelPartition = MAKE_CASCADE_PARTITION(confOmegaSelection);
-  Preslice<FemtoOmegasWithLabel> perColOmegasWithLabel = femtobase::stored::fColId;
+  o2::framework::Partition<FemtoOmegasWithLabel> omegaWithLabelPartition = MAKE_CASCADE_PARTITION(confOmegaSelection);
+  o2::framework::Preslice<FemtoOmegasWithLabel> perColOmegasWithLabel = o2::aod::femtobase::stored::fColId;
 
   cascadehistmanager::ConfOmegaBinning confOmegaBinning;
   cascadehistmanager::ConfOmegaQaBinning confOmegaQaBinning;
@@ -121,43 +120,52 @@ struct FemtoCascadeQa {
   trackhistmanager::ConfCascadeBachelorBinning confBachelorBinning;
   trackhistmanager::ConfCascadeBachelorQaBinning confBachelorQaBinning;
 
-  HistogramRegistry hRegistry{"FemtoCascadeQA", {}, OutputObjHandlingPolicy::AnalysisObject};
+  o2::framework::HistogramRegistry hRegistry{"FemtoCascadeQA", {}, o2::framework::OutputObjHandlingPolicy::AnalysisObject};
 
-  void init(InitContext&)
+  void init(o2::framework::InitContext&)
   {
-    if ((doprocessXi + doprocessXiMc + doprocessOmega + doprocessOmegaMc) > 1) {
+    if ((static_cast<int>(doprocessXi) + static_cast<int>(doprocessXiMc) + static_cast<int>(doprocessOmega) + static_cast<int>(doprocessOmegaMc)) > 1) {
       LOG(fatal) << "Only one process can be activated";
     }
     bool processData = doprocessXi || doprocessOmega;
+
     xiCleaner.init(confXiCleaner);
     omegaCleaner.init(confOmegaCleaner);
+
+    std::map<colhistmanager::ColHist, std::vector<o2::framework::AxisSpec>> colHistSpec;
+    std::map<trackhistmanager::TrackHist, std::vector<o2::framework::AxisSpec>> bachelorHistSpec;
+    std::map<trackhistmanager::TrackHist, std::vector<o2::framework::AxisSpec>> posDaughterHistSpec;
+    std::map<trackhistmanager::TrackHist, std::vector<o2::framework::AxisSpec>> negDaughterHistSpec;
+    std::map<cascadehistmanager::CascadeHist, std::vector<o2::framework::AxisSpec>> xiHistSpec;
+    std::map<cascadehistmanager::CascadeHist, std::vector<o2::framework::AxisSpec>> omegaHistSpec;
+
     if (processData) {
-      auto colHistSpec = colhistmanager::makeColQaHistSpecMap(confCollisionBinning, confCollisionQaBinning);
-      colHistManager.init<modes::Mode::kAnalysis_Qa>(&hRegistry, colHistSpec, confCollisionQaBinning);
-      auto bachelorHistSpec = trackhistmanager::makeTrackQaHistSpecMap(confBachelorBinning, confBachelorQaBinning);
-      auto posDaughterHistSpec = trackhistmanager::makeTrackQaHistSpecMap(confPosDaughterBinning, confPosDaughterQaBinning);
-      auto negDaughterHistSpec = trackhistmanager::makeTrackQaHistSpecMap(confNegDaughterBinning, confNegDaughterQaBinning);
+      colHistSpec = colhistmanager::makeColQaHistSpecMap(confCollisionBinning, confCollisionQaBinning);
+      colHistManager.init<modes::Mode::kReco_Qa>(&hRegistry, colHistSpec, confCollisionBinning, confCollisionQaBinning);
+      bachelorHistSpec = trackhistmanager::makeTrackQaHistSpecMap(confBachelorBinning, confBachelorQaBinning);
+      posDaughterHistSpec = trackhistmanager::makeTrackQaHistSpecMap(confPosDaughterBinning, confPosDaughterQaBinning);
+      negDaughterHistSpec = trackhistmanager::makeTrackQaHistSpecMap(confNegDaughterBinning, confNegDaughterQaBinning);
       if (doprocessXi) {
-        auto xiHistSpec = cascadehistmanager::makeCascadeQaHistSpecMap(confXiBinning, confXiQaBinning);
-        xiHistManager.init<modes::Mode::kAnalysis_Qa>(&hRegistry, xiHistSpec, confXiSelection, confXiQaBinning, bachelorHistSpec, confBachelorQaBinning, posDaughterHistSpec, confPosDaughterQaBinning, negDaughterHistSpec, confNegDaughterQaBinning);
+        xiHistSpec = cascadehistmanager::makeCascadeQaHistSpecMap(confXiBinning, confXiQaBinning);
+        xiHistManager.init<modes::Mode::kReco_Qa>(&hRegistry, xiHistSpec, confXiSelection, confXiQaBinning, bachelorHistSpec, confBachelorQaBinning, posDaughterHistSpec, confPosDaughterQaBinning, negDaughterHistSpec, confNegDaughterQaBinning);
       }
       if (doprocessOmega) {
-        auto omegaHistSpec = cascadehistmanager::makeCascadeQaHistSpecMap(confOmegaBinning, confOmegaQaBinning);
-        omegaHistManager.init<modes::Mode::kAnalysis_Qa>(&hRegistry, omegaHistSpec, confOmegaSelection, confOmegaQaBinning, bachelorHistSpec, confBachelorQaBinning, posDaughterHistSpec, confPosDaughterQaBinning, negDaughterHistSpec, confNegDaughterQaBinning);
+        omegaHistSpec = cascadehistmanager::makeCascadeQaHistSpecMap(confOmegaBinning, confOmegaQaBinning);
+        omegaHistManager.init<modes::Mode::kReco_Qa>(&hRegistry, omegaHistSpec, confOmegaSelection, confOmegaQaBinning, bachelorHistSpec, confBachelorQaBinning, posDaughterHistSpec, confPosDaughterQaBinning, negDaughterHistSpec, confNegDaughterQaBinning);
       }
     } else {
-      auto colHistSpec = colhistmanager::makeColMcQaHistSpecMap(confCollisionBinning, confCollisionQaBinning);
-      colHistManager.init<modes::Mode::kAnalysis_Qa_Mc>(&hRegistry, colHistSpec, confCollisionQaBinning);
-      auto bachelorHistSpec = trackhistmanager::makeTrackMcQaHistSpecMap(confBachelorBinning, confBachelorQaBinning);
-      auto posDaughterHistSpec = trackhistmanager::makeTrackMcQaHistSpecMap(confPosDaughterBinning, confPosDaughterQaBinning);
-      auto negDaughterHistSpec = trackhistmanager::makeTrackMcQaHistSpecMap(confNegDaughterBinning, confNegDaughterQaBinning);
+      colHistSpec = colhistmanager::makeColMcQaHistSpecMap(confCollisionBinning, confCollisionQaBinning);
+      colHistManager.init<modes::Mode::kReco_Qa_Mc>(&hRegistry, colHistSpec, confCollisionBinning, confCollisionQaBinning);
+      bachelorHistSpec = trackhistmanager::makeTrackMcQaHistSpecMap(confBachelorBinning, confBachelorQaBinning);
+      posDaughterHistSpec = trackhistmanager::makeTrackMcQaHistSpecMap(confPosDaughterBinning, confPosDaughterQaBinning);
+      negDaughterHistSpec = trackhistmanager::makeTrackMcQaHistSpecMap(confNegDaughterBinning, confNegDaughterQaBinning);
       if (doprocessXiMc) {
-        auto xiHistSpec = cascadehistmanager::makeCascadeMcQaHistSpecMap(confXiBinning, confXiQaBinning);
-        xiHistManager.init<modes::Mode::kAnalysis_Qa_Mc>(&hRegistry, xiHistSpec, confXiSelection, confXiQaBinning, bachelorHistSpec, confBachelorQaBinning, posDaughterHistSpec, confPosDaughterQaBinning, negDaughterHistSpec, confNegDaughterQaBinning);
+        xiHistSpec = cascadehistmanager::makeCascadeMcQaHistSpecMap(confXiBinning, confXiQaBinning);
+        xiHistManager.init<modes::Mode::kReco_Qa_Mc>(&hRegistry, xiHistSpec, confXiSelection, confXiQaBinning, bachelorHistSpec, confBachelorQaBinning, posDaughterHistSpec, confPosDaughterQaBinning, negDaughterHistSpec, confNegDaughterQaBinning);
       }
       if (doprocessOmegaMc) {
-        auto omegaHistSpec = cascadehistmanager::makeCascadeMcQaHistSpecMap(confOmegaBinning, confOmegaQaBinning);
-        omegaHistManager.init<modes::Mode::kAnalysis_Qa_Mc>(&hRegistry, omegaHistSpec, confOmegaSelection, confOmegaQaBinning, bachelorHistSpec, confBachelorQaBinning, posDaughterHistSpec, confPosDaughterQaBinning, negDaughterHistSpec, confNegDaughterQaBinning);
+        omegaHistSpec = cascadehistmanager::makeCascadeMcQaHistSpecMap(confOmegaBinning, confOmegaQaBinning);
+        omegaHistManager.init<modes::Mode::kReco_Qa_Mc>(&hRegistry, omegaHistSpec, confOmegaSelection, confOmegaQaBinning, bachelorHistSpec, confBachelorQaBinning, posDaughterHistSpec, confPosDaughterQaBinning, negDaughterHistSpec, confNegDaughterQaBinning);
       }
     }
     hRegistry.print();
@@ -165,55 +173,67 @@ struct FemtoCascadeQa {
 
   void processXi(FilteredFemtoCollision const& col, FemtoXis const& /*xis*/, FemtoTracks const& tracks)
   {
-    colHistManager.fill<modes::Mode::kAnalysis_Qa>(col);
-    auto xiSlice = xiPartition->sliceByCached(femtobase::stored::fColId, col.globalIndex(), cache);
+    auto xiSlice = xiPartition->sliceByCached(o2::aod::femtobase::stored::fColId, col.globalIndex(), cache);
+    if (xiSlice.size() == 0) {
+      return;
+    }
+    colHistManager.fill<modes::Mode::kReco_Qa>(col);
     for (auto const& xi : xiSlice) {
-      xiHistManager.fill<modes::Mode::kAnalysis_Qa>(xi, tracks);
+      xiHistManager.fill<modes::Mode::kReco_Qa>(xi, tracks);
     }
   }
   PROCESS_SWITCH(FemtoCascadeQa, processXi, "Process Xis", true);
 
-  void processXiMc(FilteredFemtoCollisionWithLabel const& col, FMcCols const& mcCols, FemtoTracksWithLabel const& tracks, FemtoXisWithLabel const& /*xis*/, FMcParticles const& mcParticles, FMcMothers const& mcMothers, FMcPartMoths const& mcPartonicMothers)
+  void processXiMc(FilteredFemtoCollisionWithLabel const& col, o2::aod::FMcCols const& mcCols, FemtoTracksWithLabel const& tracks, FemtoXisWithLabel const& /*xis*/, FemtoMcParticlesWithLabel const& mcParticles, o2::aod::FMcMothers const& mcMothers, o2::aod::FMcPartMoths const& mcPartonicMothers)
   {
-    colHistManager.fill<modes::Mode::kAnalysis_Qa_Mc>(col, mcCols);
-    auto xiSlice = xiWithLabelPartition->sliceByCached(femtobase::stored::fColId, col.globalIndex(), cache);
+    auto xiSlice = xiWithLabelPartition->sliceByCached(o2::aod::femtobase::stored::fColId, col.globalIndex(), cache);
+    if (xiSlice.size() == 0) {
+      return;
+    }
+    colHistManager.fill<modes::Mode::kReco_Qa_Mc>(col, mcCols);
     for (auto const& xi : xiSlice) {
       if (!xiCleaner.isClean(xi, mcParticles, mcMothers, mcPartonicMothers)) {
         continue;
       }
-      xiHistManager.fill<modes::Mode::kAnalysis_Qa_Mc>(xi, tracks, mcParticles, mcMothers, mcPartonicMothers);
+      xiHistManager.fill<modes::Mode::kReco_Qa_Mc>(xi, tracks, mcParticles, mcMothers, mcPartonicMothers);
     }
   }
   PROCESS_SWITCH(FemtoCascadeQa, processXiMc, "Process Xis with MC information", false);
 
   void processOmega(FilteredFemtoCollision const& col, FemtoOmegas const& /*omegas*/, FemtoTracks const& tracks)
   {
-    colHistManager.fill<modes::Mode::kAnalysis_Qa>(col);
-    auto omegaSlice = omegaPartition->sliceByCached(femtobase::stored::fColId, col.globalIndex(), cache);
+    auto omegaSlice = omegaPartition->sliceByCached(o2::aod::femtobase::stored::fColId, col.globalIndex(), cache);
+    if (omegaSlice.size() == 0) {
+      return;
+    }
+    colHistManager.fill<modes::Mode::kReco_Qa>(col);
     for (auto const& omega : omegaSlice) {
-      omegaHistManager.fill<modes::Mode::kAnalysis_Qa>(omega, tracks);
+      omegaHistManager.fill<modes::Mode::kReco_Qa>(omega, tracks);
     }
   }
   PROCESS_SWITCH(FemtoCascadeQa, processOmega, "Process Omegas", false);
 
-  void processOmegaMc(FilteredFemtoCollisionWithLabel const& col, FMcCols const& mcCols, FemtoTracksWithLabel const& tracks, FemtoOmegasWithLabel const& /*omegas*/, FMcParticles const& mcParticles, FMcMothers const& mcMothers, FMcPartMoths const& mcPartonicMothers)
+  void processOmegaMc(FilteredFemtoCollisionWithLabel const& col, o2::aod::FMcCols const& mcCols, FemtoTracksWithLabel const& tracks, FemtoOmegasWithLabel const& /*omegas*/, FemtoMcParticlesWithLabel const& mcParticles, o2::aod::FMcMothers const& mcMothers, o2::aod::FMcPartMoths const& mcPartonicMothers)
   {
-    colHistManager.fill<modes::Mode::kAnalysis_Qa_Mc>(col, mcCols);
-    auto omegaSlice = omegaWithLabelPartition->sliceByCached(femtobase::stored::fColId, col.globalIndex(), cache);
+    auto omegaSlice = omegaWithLabelPartition->sliceByCached(o2::aod::femtobase::stored::fColId, col.globalIndex(), cache);
+    if (omegaSlice.size() == 0) {
+      return;
+    }
+    colHistManager.fill<modes::Mode::kReco_Qa_Mc>(col, mcCols);
     for (auto const& omega : omegaSlice) {
       if (!omegaCleaner.isClean(omega, mcParticles, mcMothers, mcPartonicMothers)) {
         continue;
       }
-      omegaHistManager.fill<modes::Mode::kAnalysis_Qa_Mc>(omega, tracks, mcParticles, mcMothers, mcPartonicMothers);
+      omegaHistManager.fill<modes::Mode::kReco_Qa_Mc>(omega, tracks, mcParticles, mcMothers, mcPartonicMothers);
     }
   }
   PROCESS_SWITCH(FemtoCascadeQa, processOmegaMc, "Process Omegas with MC information", false);
 };
 
-WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
+o2::framework::WorkflowSpec defineDataProcessing(o2::framework::ConfigContext const& context)
 {
-  WorkflowSpec workflow{
-    adaptAnalysisTask<FemtoCascadeQa>(cfgc),
+  o2::framework::WorkflowSpec workflow{
+    adaptAnalysisTask<FemtoCascadeQa>(context),
   };
   return workflow;
 }

@@ -15,8 +15,7 @@
 @brief  CutCulator (Compute bitmask for selecting particles in the Femto Framework)
 @author Anton Riedel <anton.riedel@cern.ch>, Technical University of Munich
 """
-
-import ROOT
+import ROOT  # pylint: disable=import-error
 import argparse
 
 VALUE_DELIM = "___"
@@ -35,6 +34,21 @@ def parse_bin_label(label):
     return result
 
 
+def is_filter_histogram(bins):
+    """
+    Determine whether the parsed bins belong to a filter histogram (fixed,
+    non-selectable pre-filter values) rather than a selection/bitmask histogram.
+    Filter bins carry a "FilterName" key; selection bins carry "SelectionName".
+    """
+    for b in bins:
+        if "FilterName" in b:
+            return True
+        if "SelectionName" in b:
+            return False
+    # no parseable bins at all; treat as selection histogram (existing behavior)
+    return False
+
+
 def format_value_with_comment(b):
     """Return Value plus optional (comment=...) suffix."""
     val = b.get("Value", "")
@@ -44,17 +58,39 @@ def format_value_with_comment(b):
     return val
 
 
+def print_filter_values(bins):
+    """
+    Filters are fixed values already applied when the producer ran — there is
+    nothing to select. Just print each filter's name and value.
+    """
+    print("\n=======================================")
+    print("Filter values used in this histogram:")
+    print("=======================================\n")
+    for b in bins:
+        name = b.get("FilterName", "unknown")
+        value = b.get("FilterValue", "")
+        print(f"  {name}: {value}")
+
+
 def ask_user_selection(group):
     """
     Prompt user to select bin(s) for this selection group.
     - If minimal selections contain exactly 1 entry → auto-select it.
     - Optional selections remain user-selectable.
+    - Neutral selections are neither minimal nor optional (useful for rejection masks or in pass through mode)
     """
     selection_name = group[0].get("SelectionName", "unknown")
 
-    # Separate minimal and optional bins
+    # Separate bins by type
     minimal_bins = [b for b in group if b.get("MinimalCut", "0") == "1" and b.get("OptionalCut", "0") == "0"]
     optional_bins = [b for b in group if b.get("OptionalCut", "0") == "1"]
+    neutral_bins = [
+        b
+        for b in group
+        if b.get("MinimalCut", "0") == "0"
+        and b.get("OptionalCut", "0") == "0"
+        and b.get("BitPosition", "X").upper() != "X"
+    ]
 
     selected_bins = []
 
@@ -107,7 +143,34 @@ def ask_user_selection(group):
                             b = optional_bins[i - 1]
                             selected_bins.append(b)
                             chosen.append(format_value_with_comment(b))
+                    print("Selected: " + ", ".join(chosen))
+                    break
+            except ValueError:
+                pass
 
+            print("Invalid input. Please enter valid indices separated by space.")
+
+    # ----- Neither minimal nor optional-----
+    if neutral_bins:
+        print(f"\nSelection: {selection_name} (neutral selection, 0 to skip)")
+        for idx, b in enumerate(neutral_bins, start=1):
+            print(f"  [{idx}] {format_value_with_comment(b)}")
+
+        while True:
+            sel_input = input("Enter indices separated by space (0 to skip): ")
+            if not sel_input.strip() or sel_input.strip() == "0":
+                print("Selected: (skipped)")
+                break
+
+            try:
+                indices = [int(x) for x in sel_input.split()]
+                if all(0 <= i <= len(neutral_bins) for i in indices):
+                    chosen = []
+                    for i in indices:
+                        if i != 0:
+                            b = neutral_bins[i - 1]
+                            selected_bins.append(b)
+                            chosen.append(format_value_with_comment(b))
                     print("Selected: " + ", ".join(chosen))
                     break
             except ValueError:
@@ -153,7 +216,8 @@ def main(rootfile_path, tdir_path="femto-producer"):
     print(f"\nUsing histogram: {hname}")
     print(f"Histogram contains {nbins} bins.\n")
 
-    # parse all bins, ignoring the last 2 special bins
+    # parse all bins, ignoring the last 2 special bins ("All analyzed"/"All passed",
+    # present on both selection and filter histograms)
     bins = []
     for i in range(1, nbins - 2 + 1):
         label = hist.GetXaxis().GetBinLabel(i)
@@ -162,6 +226,16 @@ def main(rootfile_path, tdir_path="femto-producer"):
         bdict = parse_bin_label(label)
         bdict["_bin_index"] = i
         bins.append(bdict)
+
+    if not bins:
+        print("No parseable bins found in this histogram.")
+        return
+
+    # filter histograms carry fixed, already-applied values — nothing to select,
+    # so just print them and skip the interactive/bitmask machinery entirely
+    if is_filter_histogram(bins):
+        print_filter_values(bins)
+        return
 
     # group by SelectionName
     groups = {}

@@ -1,4 +1,4 @@
-// Copyright 2019-2022 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -16,26 +16,29 @@
 #ifndef PWGCF_FEMTO_CORE_CLOSEPAIRREJECTION_H_
 #define PWGCF_FEMTO_CORE_CLOSEPAIRREJECTION_H_
 
-#include "RecoDecay.h"
-
-#include "PWGCF/Femto/Core/femtoUtils.h"
 #include "PWGCF/Femto/Core/histManager.h"
 
-#include "Framework/Configurable.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/HistogramSpec.h"
+#include "Common/Core/RecoDecay.h"
+
+#include <CommonConstants/MathConstants.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/Logger.h>
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <numeric>
+#include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
-namespace o2::analysis::femto
-{
-namespace closepairrejection
+namespace o2::analysis::femto::closepairrejection
 {
 // enum for track histograms
 enum CprHist {
@@ -50,17 +53,20 @@ enum CprHist {
   kRadius6,
   kRadius7,
   kRadius8,
+  kPhi1VsPhi2,
+  kEta1VsEta2,
   kCprHistogramLast
 };
 
 // template configurable group for Cpr
-template <const char* Prefix>
+template <auto& Prefix>
 struct ConfCpr : o2::framework::ConfigurableGroup {
   std::string prefix = std::string(Prefix);
   o2::framework::Configurable<bool> cutAverage{"cutAverage", true, "Apply CPR if the average deta-dphistar is below the configured values"};
   o2::framework::Configurable<bool> cutAnyRadius{"cutAnyRadius", false, "Apply CPR if the deta-dphistar is below the configured values at any radius"};
   o2::framework::Configurable<bool> plotAllRadii{"plotAllRadii", true, "Plot deta-dphi distribution at all radii"};
   o2::framework::Configurable<bool> plotAverage{"plotAverage", true, "Plot average deta dphi distribution"};
+  o2::framework::Configurable<bool> plotAngularCorrelation{"plotAngularCorrelation", false, "Plot angular correlation of particles (eta1 vs eta2 & phi1 vs phi2"};
   o2::framework::Configurable<float> detaMax{"detaMax", 0.01f, "Maximium deta"};
   o2::framework::Configurable<float> dphistarMax{"dphistarMax", 0.01f, "Maximum dphistar"};
   o2::framework::Configurable<float> detaCenter{"detaCenter", 0.f, "Center of deta cut"};
@@ -69,23 +75,33 @@ struct ConfCpr : o2::framework::ConfigurableGroup {
   o2::framework::Configurable<float> kinematicMax{"kinematicMax", -1.f, "Maximum kstar/Q3 of pair/triplet for plotting (Set to negative value to turn off the cut)"};
   o2::framework::ConfigurableAxis binningDeta{"binningDeta", {{250, -0.5, 0.5}}, "deta"};
   o2::framework::ConfigurableAxis binningDphistar{"binningDphistar", {{250, -0.5, 0.5}}, "dphi"};
+  o2::framework::ConfigurableAxis binningCorrelationPhi{"binningCorrelationPhi", {{720, 0, o2::constants::math::TwoPI}}, "Phi binning for correlation plot"};
+  o2::framework::ConfigurableAxis binningCorrelationEta{"binningCorrelationEta", {{160, -0.8, 0.8}}, "Eta binning for correlation plot"};
+  o2::framework::Configurable<int> seed{"seed", -1, "Seed to randomize particle 1 and particle 2. Set to negative value to deactivate. Set to 0 to generate unique seed in time."};
+  o2::framework::Configurable<float> magField{"magField", 5, "MC ONLY: In case of pure MC processing (no reconstruction), set magnetic field in kG"};
 };
 
 constexpr const char PrefixCprTrackTrack[] = "CprTrackTrack";
 constexpr const char PrefixCprTrackV0Daughter[] = "CprTrackV0Daughter";
+constexpr const char PrefixCprTrackD0Daughter[] = "CprTrackD0Daughter";
 constexpr const char PrefixCprTrackResonanceDaughter[] = "CprTrackResonanceDaughter";
 constexpr const char PrefixCprTrackKinkDaughter[] = "CprTrackKinkDaughter";
 constexpr const char PrefixCprV0DaughterV0DaughterPos[] = "CprV0DaughterV0DaughterPos";
 constexpr const char PrefixCprV0DaughterV0DaughterNeg[] = "CprV0DaughterV0DaughterNeg";
+constexpr const char PrefixCprV0DaughterResoDaughterPos[] = "CprV0DaughterResoDaughterPos";
+constexpr const char PrefixCprV0DaughterResoDaughterNeg[] = "CprV0DaughterResoDaughterNeg";
 constexpr const char PrefixCprTrackCascadeBachelor[] = "CprTrackCascadeBachelor";
 
 // pairs
 using ConfCprTrackTrack = ConfCpr<PrefixCprTrackTrack>;
 using ConfCprTrackV0Daughter = ConfCpr<PrefixCprTrackV0Daughter>;
+using ConfCprTrackD0Daughter = ConfCpr<PrefixCprTrackD0Daughter>;
 using ConfCprTrackResonanceDaughter = ConfCpr<PrefixCprTrackResonanceDaughter>;
 using ConfCprTrackKinkDaughter = ConfCpr<PrefixCprTrackKinkDaughter>;
 using ConfCprV0DaugherV0DaughterPos = ConfCpr<PrefixCprV0DaughterV0DaughterPos>;
 using ConfCprV0DaugherV0DaughterNeg = ConfCpr<PrefixCprV0DaughterV0DaughterNeg>;
+using ConfCprV0DaughterResoDaughterPos = ConfCpr<PrefixCprV0DaughterResoDaughterPos>;
+using ConfCprV0DaughterResoDaughterNeg = ConfCpr<PrefixCprV0DaughterResoDaughterNeg>;
 using ConfCprTrackCascadeBachelor = ConfCpr<PrefixCprTrackCascadeBachelor>;
 
 // tpc radii for computing phistar
@@ -97,35 +113,45 @@ constexpr char PrefixTrackTrackSe[] = "CPR_TrackTrack/SE/";
 constexpr char PrefixTrackTrackMe[] = "CPR_TrackTrack/ME/";
 constexpr char PrefixTrackV0DaughterSe[] = "CPR_TrackV0Dau/SE/";
 constexpr char PrefixTrackV0DaughterMe[] = "CPR_TrackV0Dau/ME/";
+constexpr char PrefixTrackD0DaughterSe[] = "CPR_TrackD0Dau/SE/";
+constexpr char PrefixTrackD0DaughterMe[] = "CPR_TrackD0Dau/ME/";
 constexpr char PrefixV0V0PosSe[] = "CPR_V0V0_PosDau/SE/";
 constexpr char PrefixV0V0NegSe[] = "CPR_V0V0_NegDau/SE/";
 constexpr char PrefixV0V0PosMe[] = "CPR_V0V0_PosDau/ME/";
 constexpr char PrefixV0V0NegMe[] = "CPR_V0V0_NegDau/ME/";
+constexpr char PrefixV0TwoTrackResonancePosSe[] = "CPR_V0Resonance_PosDau/SE/";
+constexpr char PrefixV0TwoTrackResonanceNegSe[] = "CPR_V0Resonance_NegDau/SE/";
+constexpr char PrefixV0TwoTrackResonancePosMe[] = "CPR_V0Resonance_PosDau/ME/";
+constexpr char PrefixV0TwoTrackResonanceNegMe[] = "CPR_V0Resonance_NegDau/ME/";
 constexpr char PrefixTrackTwoTrackResonanceSe[] = "CPR_TrackResonanceDau/SE/";
 constexpr char PrefixTrackTwoTrackResonanceMe[] = "CPR_TrackResonanceDau/ME/";
 constexpr char PrefixTrackCascadeBachelorSe[] = "CPR_TrackCascadeBachelor/SE/";
 constexpr char PrefixTrackCascadeBachelorMe[] = "CPR_TrackCascadeBachelor/ME/";
 constexpr char PrefixTrackKinkSe[] = "CPR_TrackKink/SE/";
 constexpr char PrefixTrackKinkMe[] = "CPR_TrackKink/ME/";
+constexpr char PrefixMcParticleMcParticleSe[] = "CPR_McParticleMcParticle/SE/";
+constexpr char PrefixMcParticleMcParticleMe[] = "CPR_McParticleMcParticle/ME/";
 
 // must be in sync with enum TrackVariables
 // the enum gives the correct index in the array
 constexpr std::array<histmanager::HistInfo<CprHist>, kCprHistogramLast> HistTable = {
-  {{kAverage, o2::framework::kTH2F, "hAverage", "#Delta #eta vs #Delta #phi* (averaged over all radii); #Delta #eta; #Delta #phi*"},
-   {kRadius0, o2::framework::kTH2F, "hRadius0", "Radius 0: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
-   {kRadius1, o2::framework::kTH2F, "hRadius1", "Radius 1: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
-   {kRadius2, o2::framework::kTH2F, "hRadius2", "Radius 2: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
-   {kRadius3, o2::framework::kTH2F, "hRadius3", "Radius 3: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
-   {kRadius4, o2::framework::kTH2F, "hRadius4", "Radius 4: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
-   {kRadius5, o2::framework::kTH2F, "hRadius5", "Radius 5: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
-   {kRadius6, o2::framework::kTH2F, "hRadius6", "Radius 6: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
-   {kRadius7, o2::framework::kTH2F, "hRadius7", "Radius 7: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
-   {kRadius8, o2::framework::kTH2F, "hRadius8", "Radius 8: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"}}};
+  {{kAverage, o2::framework::HistType::kTH2F, "hAverage", "#Delta #eta vs #Delta #phi* (averaged over all radii); #Delta #eta; #Delta #phi*"},
+   {kRadius0, o2::framework::HistType::kTH2F, "hRadius0", "Radius 0: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
+   {kRadius1, o2::framework::HistType::kTH2F, "hRadius1", "Radius 1: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
+   {kRadius2, o2::framework::HistType::kTH2F, "hRadius2", "Radius 2: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
+   {kRadius3, o2::framework::HistType::kTH2F, "hRadius3", "Radius 3: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
+   {kRadius4, o2::framework::HistType::kTH2F, "hRadius4", "Radius 4: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
+   {kRadius5, o2::framework::HistType::kTH2F, "hRadius5", "Radius 5: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
+   {kRadius6, o2::framework::HistType::kTH2F, "hRadius6", "Radius 6: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
+   {kRadius7, o2::framework::HistType::kTH2F, "hRadius7", "Radius 7: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
+   {kRadius8, o2::framework::HistType::kTH2F, "hRadius8", "Radius 8: #Delta #eta vs #Delta #phi*; #Delta #eta; #Delta #phi*"},
+   {kPhi1VsPhi2, o2::framework::HistType::kTH2F, "hPhi1vsPhi2", "#phi_{1} vs #phi_{2}; #phi_{1}; #phi_{2}"},
+   {kEta1VsEta2, o2::framework::HistType::kTH2F, "hEta1VsEta2", "#eta_{1} vs #eta_{2}; #eta_{1}; #eta_{2}"}}};
 
 template <typename T>
 auto makeCprHistSpecMap(const T& confCpr)
 {
-  return std::map<CprHist, std::vector<framework::AxisSpec>>{
+  return std::map<CprHist, std::vector<o2::framework::AxisSpec>>{
     {kAverage, {confCpr.binningDeta, confCpr.binningDphistar}},
     {kRadius0, {confCpr.binningDeta, confCpr.binningDphistar}},
     {kRadius1, {confCpr.binningDeta, confCpr.binningDphistar}},
@@ -135,10 +161,13 @@ auto makeCprHistSpecMap(const T& confCpr)
     {kRadius5, {confCpr.binningDeta, confCpr.binningDphistar}},
     {kRadius6, {confCpr.binningDeta, confCpr.binningDphistar}},
     {kRadius7, {confCpr.binningDeta, confCpr.binningDphistar}},
-    {kRadius8, {confCpr.binningDeta, confCpr.binningDphistar}}};
+    {kRadius8, {confCpr.binningDeta, confCpr.binningDphistar}},
+    {kPhi1VsPhi2, {confCpr.binningCorrelationPhi, confCpr.binningCorrelationPhi}},
+    {kEta1VsEta2, {confCpr.binningCorrelationEta, confCpr.binningCorrelationEta}},
+  };
 };
 
-template <const char* prefix>
+template <auto& prefix>
 class CloseTrackRejection
 {
  public:
@@ -175,6 +204,19 @@ class CloseTrackRejection
     mPlotAverage = confCpr.plotAverage.value;
     mPlotAllRadii = confCpr.plotAllRadii.value;
 
+    mPlotAngularCorrelation = confCpr.plotAngularCorrelation.value;
+
+    if (confCpr.seed.value >= 0) {
+      uint64_t randomSeed = 0;
+      mRandomizeTracks = true;
+      if (confCpr.seed.value == 0) {
+        randomSeed = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+      } else {
+        randomSeed = static_cast<uint64_t>(confCpr.seed.value);
+      }
+      mRng = std::mt19937(randomSeed);
+    }
+
     // check if we need to apply any cut a plot is requested
     mIsActivated = mCutAverage || mCutAnyRadius || mPlotAverage || mPlotAllRadii;
 
@@ -194,6 +236,11 @@ class CloseTrackRejection
       mHistogramRegistry->add(std::string(prefix) + getHistNameV2(kRadius7, HistTable), getHistDesc(kRadius7, HistTable), getHistType(kRadius7, HistTable), {specs.at(kRadius7)});
       mHistogramRegistry->add(std::string(prefix) + getHistNameV2(kRadius8, HistTable), getHistDesc(kRadius8, HistTable), getHistType(kRadius8, HistTable), {specs.at(kRadius8)});
     }
+
+    if (mPlotAngularCorrelation) {
+      mHistogramRegistry->add(std::string(prefix) + getHistNameV2(kPhi1VsPhi2, HistTable), getHistDesc(kPhi1VsPhi2, HistTable), getHistType(kPhi1VsPhi2, HistTable), {specs.at(kPhi1VsPhi2)});
+      mHistogramRegistry->add(std::string(prefix) + getHistNameV2(kEta1VsEta2, HistTable), getHistDesc(kEta1VsEta2, HistTable), getHistType(kEta1VsEta2, HistTable), {specs.at(kEta1VsEta2)});
+    }
   }
 
   void setMagField(float magField) { mMagField = magField; }
@@ -211,11 +258,19 @@ class CloseTrackRejection
     mDphistar.fill(0.f);
     mDphistarMask.fill(false);
 
-    mDeta = track1.eta() - track2.eta();
+    bool swapTracks = false;
+    if (mRandomizeTracks) {
+      swapTracks = (mSwapDist(mRng) == 1);
+    }
+
+    auto const& t1 = swapTracks ? track2 : track1;
+    auto const& t2 = swapTracks ? track1 : track2;
+
+    mDeta = t1.eta() - t2.eta();
 
     for (size_t i = 0; i < TpcRadii.size(); i++) {
-      auto phistar1 = phistar(mMagField, TpcRadii[i], mChargeAbsTrack1 * track1.signedPt(), track1.phi());
-      auto phistar2 = phistar(mMagField, TpcRadii[i], mChargeAbsTrack2 * track2.signedPt(), track2.phi());
+      auto phistar1 = phistar(mMagField, TpcRadii[i], mChargeAbsTrack1 * t1.signedPt(), t1.phi());
+      auto phistar2 = phistar(mMagField, TpcRadii[i], mChargeAbsTrack2 * t2.signedPt(), t2.phi());
       if (phistar1 && phistar2) {
         mDphistar.at(i) = RecoDecay::constrainAngle(phistar1.value() - phistar2.value(), -o2::constants::math::PI); // constrain angular difference between -pi and pi
         mDphistarMask.at(i) = true;
@@ -227,6 +282,13 @@ class CloseTrackRejection
       mAverageDphistar = std::accumulate(mDphistar.begin(), mDphistar.end(), 0.f) / count; // only average values if phistar could be computed
     } else {
       mAverageDphistar = 0.f; // if computation at all radii fail, set it 0
+    }
+
+    if (mPlotAngularCorrelation) {
+      mPhi1 = t1.phi();
+      mPhi2 = t2.phi();
+      mEta1 = t1.eta();
+      mEta2 = t2.eta();
     }
   }
 
@@ -242,6 +304,11 @@ class CloseTrackRejection
 
     if (mKinematicMax > 0.f && kinematic > mKinematicMax) {
       return;
+    }
+
+    if (mPlotAngularCorrelation) {
+      mHistogramRegistry->fill(HIST(prefix) + HIST(getHistName(kPhi1VsPhi2, HistTable)), mPhi1, mPhi2);
+      mHistogramRegistry->fill(HIST(prefix) + HIST(getHistName(kEta1VsEta2, HistTable)), mEta1, mEta2);
     }
 
     // fill average hist
@@ -281,7 +348,7 @@ class CloseTrackRejection
     }
   }
 
-  bool isClosePair() const
+  [[nodiscard]] bool isClosePair() const
   {
     if (!mIsActivated) {
       return false;
@@ -306,15 +373,15 @@ class CloseTrackRejection
     return isCloseAverage || isCloseAnyRadius;
   }
 
-  bool isActivated() const { return mIsActivated; }
+  [[nodiscard]] bool isActivated() const { return mIsActivated; }
 
  private:
   std::optional<float> phistar(float magfield, float radius, float signedPt, float phi)
   {
     double arg = 0.3 * (0.1 * magfield) * (0.01 * radius) / (2. * signedPt);
     if (std::fabs(arg) <= 1.) {
-      double phistar = phi - std::asin(arg);
-      return static_cast<float>(RecoDecay::constrainAngle(phistar));
+      double angle = phi - std::asin(arg);
+      return static_cast<float>(RecoDecay::constrainAngle(angle));
     }
     return std::nullopt;
   }
@@ -322,6 +389,7 @@ class CloseTrackRejection
   o2::framework::HistogramRegistry* mHistogramRegistry = nullptr;
   bool mPlotAllRadii = false;
   bool mPlotAverage = false;
+  bool mPlotAngularCorrelation = false;
 
   float mKinematicMin = -1.f;
   float mKinematicMax = -1.f;
@@ -341,11 +409,21 @@ class CloseTrackRejection
 
   float mAverageDphistar = 0.f;
   float mDeta = 0.f;
+
+  float mPhi1 = 0.f;
+  float mPhi2 = 0.f;
+  float mEta1 = 0.f;
+  float mEta2 = 0.f;
+
   std::array<float, Nradii> mDphistar = {0.f};
   std::array<bool, Nradii> mDphistarMask = {false};
+
+  bool mRandomizeTracks = false;
+  std::mt19937 mRng;
+  std::uniform_int_distribution<int> mSwapDist{0, 1};
 };
 
-template <const char* prefix>
+template <auto& prefix>
 class ClosePairRejectionTrackTrack
 {
  public:
@@ -361,18 +439,18 @@ class ClosePairRejectionTrackTrack
 
   void setMagField(float magField) { mCtr.setMagField(magField); }
   template <typename T1, typename T2, typename T3>
-  void setPair(T1 const& track1, T2 const& track2, T3 const& /*tracks*/)
+  void setPair(T1 const& track1, T2 const& track2, T3 const& /*tracks*/) // pass track table for compatibility with other classes
   {
     mCtr.compute(track1, track2);
   }
-  bool isClosePair() const { return mCtr.isClosePair(); }
+  [[nodiscard]] bool isClosePair() const { return mCtr.isClosePair(); }
   void fill(float kstar) { mCtr.fill(kstar); }
 
  private:
   CloseTrackRejection<prefix> mCtr;
 };
 
-template <const char* prefixPosDaus, const char* prefixNegDaus>
+template <auto& prefixPosDaus, auto& prefixNegDaus>
 class ClosePairRejectionV0V0
 {
  public:
@@ -405,7 +483,7 @@ class ClosePairRejectionV0V0
     mCtrNeg.compute(negDau1, negDau2);
   }
 
-  bool isClosePair() const { return mCtrPos.isClosePair() || mCtrNeg.isClosePair(); }
+  [[nodiscard]] bool isClosePair() const { return mCtrPos.isClosePair() || mCtrNeg.isClosePair(); }
 
   void fill(float kstar)
   {
@@ -418,7 +496,7 @@ class ClosePairRejectionV0V0
   CloseTrackRejection<prefixNegDaus> mCtrNeg;
 };
 
-template <const char* prefixTrackV0>
+template <auto& prefixTrackV0>
 class ClosePairRejectionTrackV0 // can also be used for any particle type that has pos/neg daughters, like resonances
 {
  public:
@@ -445,7 +523,7 @@ class ClosePairRejectionTrackV0 // can also be used for any particle type that h
     }
   }
 
-  bool isClosePair() const { return mCtr.isClosePair(); }
+  [[nodiscard]] bool isClosePair() const { return mCtr.isClosePair(); }
 
   void fill(float kstar) { mCtr.fill(kstar); }
 
@@ -453,7 +531,7 @@ class ClosePairRejectionTrackV0 // can also be used for any particle type that h
   CloseTrackRejection<prefixTrackV0> mCtr;
 };
 
-template <const char* prefixBachelor, const char* prefixV0Daughter>
+template <auto& prefixBachelor, auto& prefixV0Daughter>
 class ClosePairRejectionTrackCascade
 {
  public:
@@ -490,11 +568,7 @@ class ClosePairRejectionTrackCascade
     }
   }
 
-  bool
-    isClosePair() const
-  {
-    return mCtrBachelor.isClosePair() || mCtrBachelor.isClosePair();
-  }
+  [[nodiscard]] bool isClosePair() const { return mCtrBachelor.isClosePair() || mCtrV0Daughter.isClosePair(); }
 
   void fill(float kstar)
   {
@@ -507,7 +581,7 @@ class ClosePairRejectionTrackCascade
   CloseTrackRejection<prefixV0Daughter> mCtrV0Daughter;
 };
 
-template <const char* prefix>
+template <auto& prefix>
 class ClosePairRejectionTrackKink
 {
  public:
@@ -532,13 +606,36 @@ class ClosePairRejectionTrackKink
     mCtr.compute(track, daughter);
   }
 
-  bool isClosePair() const { return mCtr.isClosePair(); }
+  [[nodiscard]] bool isClosePair() const { return mCtr.isClosePair(); }
   void fill(float kstar) { mCtr.fill(kstar); }
 
  private:
   CloseTrackRejection<prefix> mCtr;
 };
 
-}; // namespace closepairrejection
-}; // namespace o2::analysis::femto
+template <auto& prefix>
+class ClosePairRejectionMcParticleMcParticle
+{
+ public:
+  template <typename T>
+  void init(o2::framework::HistogramRegistry* registry,
+            std::map<CprHist, std::vector<o2::framework::AxisSpec>> const& specs,
+            T const& confCpr)
+  {
+    mCtr.init(registry, specs, confCpr, 1, 1);
+    mCtr.setMagField(confCpr.magField.value);
+  }
+  template <typename T1, typename T2>
+  void setPair(T1 const& mcParticle1, T2 const& mcParticle2)
+  {
+    mCtr.compute(mcParticle1, mcParticle2);
+  }
+  [[nodiscard]] bool isClosePair() const { return mCtr.isClosePair(); }
+  void fill(float kstar) { mCtr.fill(kstar); }
+
+ private:
+  CloseTrackRejection<prefix> mCtr;
+};
+
+}; // namespace o2::analysis::femto::closepairrejection
 #endif // PWGCF_FEMTO_CORE_CLOSEPAIRREJECTION_H_

@@ -18,19 +18,19 @@
 
 #include "Common/Core/TableHelper.h"
 
-#include "CommonConstants/PhysicsConstants.h"
-#include "Framework/InitContext.h"
+#include <CommonConstants/PhysicsConstants.h>
+#include <Framework/InitContext.h>
+#include <Framework/Logger.h>
 
-#include "TPDGCode.h"
+#include <TPDGCode.h>
 
-#include "fairlogger/Logger.h"
-
+#include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
-#include <experimental/type_traits>
+#include <limits>
 #include <optional>
 #include <unordered_map>
-#include <utility>
 
 namespace o2::analysis::femto
 {
@@ -65,7 +65,7 @@ float itsSignal(T const& track)
   return static_cast<float>(signal);
 };
 
-inline double getMass(int pdgCode)
+inline double getPdgMass(int pdgCode)
 {
   // use this function instead of TDatabasePDG to return masses defined in the PhysicsConstants.h header
   // this approach saves a lot of memory and important partilces like deuteron are missing in TDatabasePDG anyway
@@ -99,6 +99,9 @@ inline double getMass(int pdgCode)
     case o2::constants::physics::Pdg::kLambdaCPlus:
       mass = o2::constants::physics::MassLambdaCPlus;
       break;
+    case o2::constants::physics::Pdg::kD0:
+      mass = o2::constants::physics::MassD0;
+      break;
     case o2::constants::physics::Pdg::kDeuteron:
       mass = o2::constants::physics::MassDeuteron;
       break;
@@ -121,7 +124,7 @@ inline double getMass(int pdgCode)
       mass = o2::constants::physics::MassOmegaMinus;
       break;
     default:
-      LOG(fatal) << "PDG code is not suppored";
+      LOG(warn) << "PDG code is not suppored. Return 0...";
   }
   return mass;
 }
@@ -131,6 +134,69 @@ float qn(T const& col)
 {
   float qn = std::sqrt(col.qvecFT0CReVec()[0] * col.qvecFT0CReVec()[0] + col.qvecFT0CImVec()[0] * col.qvecFT0CImVec()[0]) * std::sqrt(col.sumAmplFT0C());
   return qn;
+}
+
+/// Recalculate pT for Kinks (Sigmas) using kinematic constraints
+inline float calcPtnew(float pxMother, float pyMother, float pzMother, float pxDaughter, float pyDaughter, float pzDaughter)
+{
+  float almost0 = 1e-6f;
+  // Particle masses in GeV/c^2
+  auto massPion = o2::constants::physics::MassPionCharged;
+  auto massNeutron = o2::constants::physics::MassNeutron;
+  auto massSigmaMinus = o2::constants::physics::MassSigmaMinus;
+
+  // Calculate mother momentum and direction versor
+  float pMother = std::sqrt(pxMother * pxMother + pyMother * pyMother + pzMother * pzMother);
+  if (pMother < almost0) {
+    return -999.f;
+  }
+
+  float versorX = pxMother / pMother;
+  float versorY = pyMother / pMother;
+  float versorZ = pzMother / pMother;
+
+  // Calculate daughter energy
+  float ePi = std::sqrt(massPion * massPion + pxDaughter * pxDaughter + pyDaughter * pyDaughter + pzDaughter * pzDaughter);
+
+  // Scalar product of versor with daughter momentum
+  float scalarProduct = versorX * pxDaughter + versorY * pyDaughter + versorZ * pzDaughter;
+
+  // Solve quadratic equation for momentum magnitude
+  float k = massSigmaMinus * massSigmaMinus + massPion * massPion - massNeutron * massNeutron;
+  float a = 4.f * (ePi * ePi - scalarProduct * scalarProduct);
+  float b = -4.f * scalarProduct * k;
+  float c = 4.f * ePi * ePi * massSigmaMinus * massSigmaMinus - k * k;
+
+  if (std::abs(a) < almost0) {
+    return -999.f;
+  }
+
+  float d = b * b - 4.f * a * c;
+  if (d < 0.f) {
+    return -999.f;
+  }
+
+  float sqrtD = std::sqrt(d);
+  float p1 = (-b + sqrtD) / (2.f * a);
+  float p2 = (-b - sqrtD) / (2.f * a);
+
+  // Pick physical solution: prefer P2 if positive, otherwise P1
+  if (p2 < 0.f && p1 < 0.f) {
+    return -999.f;
+  }
+  if (p2 < 0.f) {
+    return p1;
+  }
+
+  // Choose solution closest to original momentum
+  float p1Diff = std::abs(p1 - pMother);
+  float p2Diff = std::abs(p2 - pMother);
+  float p = (p1Diff < p2Diff) ? p1 : p2;
+
+  // Calculate pT from recalibrated momentum
+  float pxS = versorX * p;
+  float pyS = versorY * p;
+  return std::sqrt(pxS * pxS + pyS * pyS);
 }
 
 inline bool enableTable(const char* tableName, int userSetting, o2::framework::InitContext& initContext)
@@ -150,11 +216,16 @@ inline bool enableTable(const char* tableName, int userSetting, o2::framework::I
   return required;
 }
 
-template <typename T>
-using HasMass = decltype(std::declval<T&>().mass());
+// template <typename T>
+// using HasMass = decltype(std::declval<T&>().mass());
+//
+// template <typename T>
+// using HasSign = decltype(std::declval<T&>().sign());
 
 template <typename T>
-using HasSign = decltype(std::declval<T&>().sign());
+concept HasMass = requires(T t) {
+  { t.mass() } -> std::convertible_to<float>; // or double, whatever mass() returns
+};
 
 template <typename T>
 inline int signum(T x)
@@ -162,6 +233,93 @@ inline int signum(T x)
   return (T(0) < x) - (x < T(0));
 }
 
+template <typename T>
+inline T binLinear(float value, float lo, float hi, float step)
+{
+  float v = std::clamp(value, lo, hi);
+  auto idx = static_cast<int64_t>(std::round((v - lo) / step));
+  auto maxIdx = static_cast<int64_t>(std::numeric_limits<T>::max()) - static_cast<int64_t>(std::numeric_limits<T>::min());
+  idx = std::clamp(idx, static_cast<int64_t>(0), maxIdx);
+  return static_cast<T>(idx + std::numeric_limits<T>::min());
+}
+
+template <typename T>
+inline float unBinLinear(T binned, float lo, float step)
+{
+  auto idx = static_cast<int64_t>(binned) - static_cast<int64_t>(std::numeric_limits<T>::min());
+  return lo + static_cast<float>(idx) * step;
+}
+
+template <typename T>
+inline T binLogSigned(float signedValue, float magMin, float magMax)
+{
+  static_assert(std::is_unsigned_v<T>, "binLogSigned requires an unsigned storage type");
+  constexpr uint32_t TotalBits = sizeof(T) * 8;
+  constexpr uint32_t HalfLevels = 1u << (TotalBits - 1);
+  uint32_t sign = (signedValue < 0.f) ? 1u : 0u;
+  float mag = std::clamp(std::fabs(signedValue), magMin, magMax);
+  float logLo = std::log(magMin);
+  float logHi = std::log(magMax);
+  float step = (logHi - logLo) / static_cast<float>(HalfLevels - 1);
+  auto idx = static_cast<uint32_t>(std::round((std::log(mag) - logLo) / step));
+  idx = std::clamp(idx, 0u, HalfLevels - 1);
+  return static_cast<T>((sign << (TotalBits - 1)) | idx);
+}
+
+template <typename T>
+inline float unBinLogSigned(T binned, float magMin, float magMax)
+{
+  constexpr uint32_t TotalBits = sizeof(T) * 8;
+  constexpr uint32_t HalfLevels = 1u << (TotalBits - 1);
+  constexpr T SignMask = static_cast<T>(1u << (TotalBits - 1));
+  constexpr T MagMask = static_cast<T>(SignMask - 1);
+  float sign = (binned & SignMask) ? -1.f : 1.f;
+  uint32_t idx = binned & MagMask;
+  float logLo = std::log(magMin);
+  float logHi = std::log(magMax);
+  float step = (logHi - logLo) / static_cast<float>(HalfLevels - 1);
+  float mag = std::exp(logLo + static_cast<float>(idx) * step);
+  return sign * mag;
+}
+
+template <typename T>
+inline int unBinSign(T binned)
+{
+  static_assert(std::is_unsigned_v<T>, "unBinSign requires an unsigned storage type");
+  constexpr uint64_t TotalBits = sizeof(T) * 8;
+  constexpr T SignMask = static_cast<T>(uint64_t{1} << (TotalBits - 1));
+  return (binned & SignMask) ? -1 : 1;
+}
+
+template <typename T>
+inline T binLogUnsigned(float value, float magMin, float magMax)
+{
+  static_assert(std::is_unsigned_v<T>, "binLogUnsigned requires an unsigned storage type");
+  constexpr uint64_t TotalBits = sizeof(T) * 8;
+  constexpr uint64_t Levels = uint64_t{1} << TotalBits; // number of representable values, e.g. 65536 for uint16_t
+  float mag = std::clamp(value, magMin, magMax);
+  float logLo = std::log(magMin);
+  float logHi = std::log(magMax);
+  float step = (logHi - logLo) / static_cast<float>(Levels - 1);
+  auto idx = static_cast<uint64_t>(std::round((std::log(mag) - logLo) / step));
+  idx = std::clamp(idx, uint64_t{0}, Levels - 1);
+  return static_cast<T>(idx);
+}
+
+template <typename T>
+inline float unBinLogUnsigned(T binned, float magMin, float magMax)
+{
+  constexpr uint64_t TotalBits = sizeof(T) * 8;
+  constexpr uint64_t Levels = uint64_t{1} << TotalBits;
+  uint64_t idx = binned;
+  float logLo = std::log(magMin);
+  float logHi = std::log(magMax);
+  float step = (logHi - logLo) / static_cast<float>(Levels - 1);
+  float mag = std::exp(logLo + static_cast<float>(idx) * step);
+  return mag;
+}
+
 }; // namespace utils
 }; // namespace o2::analysis::femto
+//
 #endif // PWGCF_FEMTO_CORE_FEMTOUTILS_H_

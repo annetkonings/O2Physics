@@ -28,8 +28,6 @@
 #include "Common/DataModel/PIDResponseTOF.h"
 
 #include <CCDB/BasicCCDBManager.h>
-#include <DataFormatsParameters/GRPLHCIFData.h>
-#include <DataFormatsTOF/ParameterContainers.h>
 #include <Framework/ASoA.h>
 #include <Framework/AnalysisDataModel.h>
 #include <Framework/AnalysisHelpers.h>
@@ -46,16 +44,13 @@
 #include <ReconstructionDataFormats/PID.h>
 #include <TOFBase/EventTimeMaker.h>
 
-#include <TGraph.h>
 #include <TH2.h>
 #include <TString.h>
 
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -123,11 +118,11 @@ struct tofSignal {
     LOG(debug) << "Initializing the tofSignal task";
     tofResponse->initSetup(ccdb, initContext);
     // Checking that the table is requested in the workflow and enabling it
-    enableTableTOFSignal = isTableRequiredInWorkflow(initContext, "TOFSignal");
+    enableTableTOFSignal = o2::common::core::isTableRequiredInWorkflow(initContext, "TOFSignal");
     if (enableTableTOFSignal) {
       LOG(info) << "Table TOFSignal enabled!";
     }
-    enableTablepidTOFFlags = isTableRequiredInWorkflow(initContext, "pidTOFFlags");
+    enableTablepidTOFFlags = o2::common::core::isTableRequiredInWorkflow(initContext, "pidTOFFlags");
     if (enableTablepidTOFFlags) {
       LOG(info) << "Table pidTOFFlags enabled!";
     }
@@ -273,14 +268,14 @@ struct tofEventTime {
     LOG(debug) << "Initializing the tofEventTime task";
     tofResponse->initSetup(ccdb, initContext);
     // Checking that the table is requested in the workflow and enabling it
-    enableTableTOFEvTime = isTableRequiredInWorkflow(initContext, "TOFEvTime");
+    enableTableTOFEvTime = o2::common::core::isTableRequiredInWorkflow(initContext, "TOFEvTime");
 
     if (!enableTableTOFEvTime) {
       LOG(info) << "Table for TOF Event time (TOFEvTime) is not required, disabling it";
     }
     LOG(info) << "Table TOFEvTime enabled!";
 
-    enableTableEvTimeTOFOnly = isTableRequiredInWorkflow(initContext, "EvTimeTOFOnly");
+    enableTableEvTimeTOFOnly = o2::common::core::isTableRequiredInWorkflow(initContext, "EvTimeTOFOnly");
     if (enableTableEvTimeTOFOnly) {
       LOG(info) << "Table EvTimeTOFOnly enabled!";
     }
@@ -339,7 +334,7 @@ struct tofEventTime {
   ///
   /// Process function to prepare the event for each track on Run 2 data
   void processRun2(aod::Tracks const& tracks,
-                   aod::Collisions const&,
+                   aod::Collisions const& collisions,
                    aod::BCsWithTimestamps const& bcs)
   {
     if (!enableTableTOFEvTime) {
@@ -351,7 +346,7 @@ struct tofEventTime {
     tableFlags.reserve(tracks.size());
 
     for (auto const& t : tracks) { // Loop on collisions
-      if (!t.has_collision()) {    // Track was not assigned, cannot compute event time
+      if (!t.has_collision() || collisions.size() == 0) { // Track was not assigned, cannot compute event time
         tableFlags(0);
         tableEvTime(0.f, 999.f);
         continue;
@@ -370,7 +365,7 @@ struct tofEventTime {
   using ResponseImplementationEvTime = o2::pid::tof::ExpTimes<Run3TrksWtof::iterator, pid>;
   void processRun3(Run3TrksWtof const& tracks,
                    aod::FT0s const&,
-                   EvTimeCollisionsFT0 const&,
+                   EvTimeCollisionsFT0 const& collisions,
                    aod::BCsWithTimestamps const& bcs)
   {
     if (!enableTableTOFEvTime) {
@@ -406,7 +401,7 @@ struct tofEventTime {
     if (mComputeEvTimeWithTOF == 1 && mComputeEvTimeWithFT0 == 1) {
       int lastCollisionId = -1;                                                                                       // Last collision ID analysed
       for (auto const& t : tracks) {                                                                                  // Loop on collisions
-        if (!t.has_collision() || ((sel8TOFEvTime.value == true) && !t.collision_as<EvTimeCollisionsFT0>().sel8())) { // Track was not assigned, cannot compute event time or event did not pass the event selection
+        if (!t.has_collision() || collisions.size() == 0 || ((sel8TOFEvTime.value == true) && !t.collision_as<EvTimeCollisionsFT0>().sel8())) { // Track was not assigned, cannot compute event time or event did not pass the event selection
           tableFlags(0);
           tableEvTime(0.f, 999.f);
           if (enableTableEvTimeTOFOnly) {
@@ -482,7 +477,7 @@ struct tofEventTime {
     } else if (mComputeEvTimeWithTOF == 1 && mComputeEvTimeWithFT0 == 0) {
       int lastCollisionId = -1;                                                                                    // Last collision ID analysed
       for (auto const& t : tracks) {                                                                               // Loop on collisions
-        if (!t.has_collision() || ((sel8TOFEvTime.value == true) && !t.collision_as<EvTimeCollisions>().sel8())) { // Track was not assigned, cannot compute event time or event did not pass the event selection
+        if (!t.has_collision() || collisions.size() == 0 || ((sel8TOFEvTime.value == true) && !t.collision_as<EvTimeCollisions>().sel8())) { // Track was not assigned, cannot compute event time or event did not pass the event selection
           tableFlags(0);
           tableEvTime(0.f, 999.f);
           if (enableTableEvTimeTOFOnly) {
@@ -527,7 +522,7 @@ struct tofEventTime {
         if (enableTableEvTimeTOFOnly) {
           tableEvTimeTOFOnly((uint8_t)0, 0.f, 0.f, -1);
         }
-        if (!t.has_collision()) { // Track was not assigned, cannot compute event time
+        if (!t.has_collision() || collisions.size() == 0) { // Track was not assigned, cannot compute event time
           tableFlags(0);
           tableEvTime(0.f, 999.f);
           continue;
@@ -635,14 +630,14 @@ struct tofPidMerge {
     for (int i = 0; i < nSpecies; i++) {
       // First checking tiny
       int f = enableParticle->get(particleNames[i].c_str(), "Enable");
-      enableFlagIfTableRequired(initContext, "pidTOF" + particleNames[i], f);
+      o2::common::core::enableFlagIfTableRequired(initContext, "pidTOF" + particleNames[i], f);
       if (f == 1) {
         mEnabledParticles.push_back(i);
       }
 
       // Then checking full tables
       f = enableParticle->get(particleNames[i].c_str(), "EnableFull");
-      enableFlagIfTableRequired(initContext, "pidTOFFull" + particleNames[i], f);
+      o2::common::core::enableFlagIfTableRequired(initContext, "pidTOFFull" + particleNames[i], f);
       if (f == 1) {
         mEnabledParticlesFull.push_back(i);
       }
@@ -692,8 +687,8 @@ struct tofPidMerge {
     }
 
     // Checking the TOF mass and TOF beta tables
-    enableTableBeta = isTableRequiredInWorkflow(initContext, "pidTOFbeta");
-    enableTableMass = isTableRequiredInWorkflow(initContext, "pidTOFmass");
+    enableTableBeta = o2::common::core::isTableRequiredInWorkflow(initContext, "pidTOFbeta");
+    enableTableMass = o2::common::core::isTableRequiredInWorkflow(initContext, "pidTOFmass");
 
     if (!enableTableBeta && !enableTableMass) {
       LOG(info) << "No table for TOF mass and beta is required. Disabling beta and mass tables";
@@ -886,7 +881,7 @@ struct tofPidMerge {
   template <o2::track::PID::ID pid>
   using ResponseImplementation = o2::pid::tof::ExpTimes<Run3TrksWtofWevTime::iterator, pid>;
   void processRun3(Run3TrksWtofWevTime const& tracks,
-                   aod::Collisions const&,
+                   aod::Collisions const& collisions,
                    aod::BCsWithTimestamps const& bcs)
   {
     constexpr auto responseEl = ResponseImplementation<PID::Electron>();
@@ -912,7 +907,7 @@ struct tofPidMerge {
     float resolution = 1.f; // Last resolution assigned
     float nsigma = 0;
     for (auto const& trk : tracks) { // Loop on all tracks
-      if (!trk.has_collision()) {    // Track was not assigned, cannot compute NSigma (no event time) -> filling with empty table
+      if (!trk.has_collision() || collisions.size() == 0) { // Track was not assigned, cannot compute NSigma (no event time) -> filling with empty table
         for (auto const& pidId : mEnabledParticles) {
           makeTableEmpty(pidId, false);
         }
@@ -1048,7 +1043,7 @@ struct tofPidMerge {
   template <o2::track::PID::ID pid>
   using ResponseImplementationRun2 = o2::pid::tof::ExpTimes<Run2TrksWtofWevTime::iterator, pid>;
   void processRun2(Run2TrksWtofWevTime const& tracks,
-                   aod::Collisions const&,
+                   aod::Collisions const& collisions,
                    aod::BCsWithTimestamps const& bcs)
   {
     constexpr auto responseEl = ResponseImplementationRun2<PID::Electron>();
@@ -1074,7 +1069,7 @@ struct tofPidMerge {
     float resolution = 1.f; // Last resolution assigned
     float nsigma = 0;
     for (auto const& trk : tracks) { // Loop on all tracks
-      if (!trk.has_collision()) {    // Track was not assigned, cannot compute NSigma (no event time) -> filling with empty table
+      if (!trk.has_collision() || collisions.size() == 0) { // Track was not assigned, cannot compute NSigma (no event time) -> filling with empty table
         for (auto const& pidId : mEnabledParticles) {
           makeTableEmpty(pidId, false);
         }

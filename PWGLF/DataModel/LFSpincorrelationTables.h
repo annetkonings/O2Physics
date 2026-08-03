@@ -15,14 +15,8 @@
 #ifndef PWGLF_DATAMODEL_LFSPINCORRELATIONTABLES_H_
 #define PWGLF_DATAMODEL_LFSPINCORRELATIONTABLES_H_
 
-#include "Common/Core/RecoDecay.h"
-#include "Common/DataModel/Centrality.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-
-#include "Framework/ASoA.h"
-#include "Framework/AnalysisDataModel.h"
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
 
 #include <cmath>
 
@@ -58,6 +52,8 @@ DECLARE_SOA_COLUMN(ProtonEta, protonEta, float);                   //! Proton Et
 DECLARE_SOA_COLUMN(ProtonPhi, protonPhi, float);                   //! Proton Phi
 DECLARE_SOA_COLUMN(ProtonIndex, protonIndex, int);                 //! Proton index
 DECLARE_SOA_COLUMN(PionIndex, pionIndex, int);                     //! Pion index
+DECLARE_SOA_COLUMN(DcaV0ToPV, dcaV0ToPV, float);                   //! DCA of V0 to primary vertex
+
 } // namespace lambdapair
 DECLARE_SOA_TABLE(LambdaPairs, "AOD", "LAMBDAPAIR",
                   o2::soa::Index<>,
@@ -77,7 +73,8 @@ DECLARE_SOA_TABLE(LambdaPairs, "AOD", "LAMBDAPAIR",
                   lambdapair::ProtonEta,
                   lambdapair::ProtonPhi,
                   lambdapair::ProtonIndex,
-                  lambdapair::PionIndex);
+                  lambdapair::PionIndex,
+                  lambdapair::DcaV0ToPV);
 
 using LambdaPair = LambdaPairs::iterator;
 
@@ -111,6 +108,7 @@ DECLARE_SOA_COLUMN(ProtonEtamc, protonEtamc, float);                   //! Proto
 DECLARE_SOA_COLUMN(ProtonPhimc, protonPhimc, float);                   //! Proton Phi in montecarlo
 DECLARE_SOA_COLUMN(ProtonIndexmc, protonIndexmc, int);                 //! Proton index in montecarlo
 DECLARE_SOA_COLUMN(PionIndexmc, pionIndexmc, int);                     //! Pion index in montecarlo
+DECLARE_SOA_COLUMN(DcaV0ToPVmc, dcaV0ToPVmc, float);                   //! DCA of V0 to primary vertex
 } // namespace lambdapairmc
 DECLARE_SOA_TABLE(LambdaPairmcs, "AOD", "LAMBDAPAIRMC",
                   o2::soa::Index<>,
@@ -130,7 +128,8 @@ DECLARE_SOA_TABLE(LambdaPairmcs, "AOD", "LAMBDAPAIRMC",
                   lambdapairmc::ProtonEtamc,
                   lambdapairmc::ProtonPhimc,
                   lambdapairmc::ProtonIndexmc,
-                  lambdapairmc::PionIndexmc);
+                  lambdapairmc::PionIndexmc,
+                  lambdapairmc::DcaV0ToPVmc);
 
 using LambdaPairmc = LambdaPairmcs::iterator;
 

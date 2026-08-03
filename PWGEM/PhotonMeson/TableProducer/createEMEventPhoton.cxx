@@ -13,6 +13,7 @@
 /// \brief This code produces reduced events for photon analyses.
 /// \author Daiki Sekihata, daiki.sekihata@cern.ch
 
+#include "PWGEM/PhotonMeson/DataModel/EventTables.h"
 #include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
 //
 #include "PWGJE/DataModel/Jet.h"
@@ -24,9 +25,6 @@
 #include "Common/DataModel/Multiplicity.h"
 #include "Common/DataModel/Qvectors.h"
 
-#include <CCDB/BasicCCDBManager.h>
-#include <DataFormatsParameters/GRPMagField.h>
-#include <DataFormatsParameters/GRPObject.h>
 #include <Framework/AnalysisDataModel.h>
 #include <Framework/AnalysisHelpers.h>
 #include <Framework/AnalysisTask.h>
@@ -56,9 +54,9 @@ using MyCollisions = soa::Join<aod::Collisions, aod::EvSels, aod::EMEvSels, aod:
 using MyCollisionsCent = soa::Join<MyCollisions, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs>; // centrality table has dependency on multiplicity table.
 using MyCollisionsCentQvec = soa::Join<MyCollisionsCent, MyQvectors>;
 
-using MyCollisionsWithSWT = soa::Join<MyCollisions, aod::EMSWTriggerBitsTMP>;
-using MyCollisionsWithSWT_Cent = soa::Join<MyCollisionsWithSWT, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs>; // centrality table has dependency on multiplicity table.
-using MyCollisionsWithSWT_Cent_Qvec = soa::Join<MyCollisionsWithSWT_Cent, MyQvectors>;
+// using MyCollisionsWithSWT = soa::Join<MyCollisions, aod::EMSWTriggerBitsTMP>;
+// using MyCollisionsWithSWT_Cent = soa::Join<MyCollisionsWithSWT, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs>; // centrality table has dependency on multiplicity table.
+// using MyCollisionsWithSWT_Cent_Qvec = soa::Join<MyCollisionsWithSWT_Cent, MyQvectors>;
 
 using MyCollisionsMC = soa::Join<MyCollisions, aod::McCollisionLabels>;
 using MyCollisionsMCCent = soa::Join<MyCollisionsMC, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs>; // centrality table has dependency on multiplicity table.
@@ -66,14 +64,14 @@ using MyCollisionsMCCentQvec = soa::Join<MyCollisionsMCCent, MyQvectors>;
 
 struct CreateEMEventPhoton {
   // Produces<o2::aod::EMBCs> embc;
-  Produces<o2::aod::EMEvents> event;
+  Produces<o2::aod::PMEvents> event;
   Produces<o2::aod::EMEventsAlias> eventalias;
   // Produces<o2::aod::EMEventsCov> eventCov;
-  Produces<o2::aod::EMEventsMult> eventMult;
-  Produces<o2::aod::EMEventsCent> eventCent;
-  Produces<o2::aod::EMEventsQvec> eventQvec;
+  Produces<o2::aod::EMEventsMult_000> eventMult;
+  Produces<o2::aod::EMEventsCent_000> eventCent;
+  Produces<o2::aod::EMEventsQvec_001> eventQvec;
   Produces<o2::aod::EMSWTriggerBits> emswtbit;
-  Produces<o2::aod::EMEventNormInfos> event_norm_info;
+  Produces<o2::aod::EMEventNormInfos_001> event_norm_info;
   Produces<o2::aod::EMEventsWeight> eventWeights;
 
   enum class EMEventType : int {
@@ -202,13 +200,13 @@ struct CreateEMEventPhoton {
         continue;
       }
 
-      if constexpr (isTriggerAnalysis) {
-        if (collision.swtaliastmp_raw() == 0) {
-          continue;
-        } else {
-          emswtbit(collision.swtaliastmp_raw());
-        }
-      }
+      // if constexpr (isTriggerAnalysis) {
+      //   if (collision.triggerMask_raw() == 0) {
+      //     continue;
+      //   } else {
+      //     emswtbit(collision.triggerMask_raw());
+      //   }
+      // }
 
       const float qDefault = 999.f; // default value for q vectors if not obtained
 
@@ -310,23 +308,23 @@ struct CreateEMEventPhoton {
   }
   PROCESS_SWITCH(CreateEMEventPhoton, processEvent_Cent_Qvec, "process event info", false);
 
-  void processEvent_SWT(MyCollisionsWithSWT const& collisions, MyBCs const& bcs)
-  {
-    skimEvent<false, true, EMEventType::kEvent>(collisions, bcs);
-  }
-  PROCESS_SWITCH(CreateEMEventPhoton, processEvent_SWT, "process event info", false);
+  // void processEvent_SWT(MyCollisionsWithSWT const& collisions, MyBCs const& bcs)
+  // {
+  //   skimEvent<false, true, EMEventType::kEvent>(collisions, bcs);
+  // }
+  // PROCESS_SWITCH(CreateEMEventPhoton, processEvent_SWT, "process event info", false);
 
-  void processEvent_SWT_Cent(MyCollisionsWithSWT_Cent const& collisions, MyBCs const& bcs)
-  {
-    skimEvent<false, true, EMEventType::kEvent_Cent>(collisions, bcs);
-  }
-  PROCESS_SWITCH(CreateEMEventPhoton, processEvent_SWT_Cent, "process event info", false);
+  // void processEvent_SWT_Cent(MyCollisionsWithSWT_Cent const& collisions, MyBCs const& bcs)
+  // {
+  //   skimEvent<false, true, EMEventType::kEvent_Cent>(collisions, bcs);
+  // }
+  // PROCESS_SWITCH(CreateEMEventPhoton, processEvent_SWT_Cent, "process event info", false);
 
-  void processEvent_SWT_Cent_Qvec(MyCollisionsWithSWT_Cent_Qvec const& collisions, MyBCs const& bcs)
-  {
-    skimEvent<false, true, EMEventType::kEvent_Cent_Qvec>(collisions, bcs);
-  }
-  PROCESS_SWITCH(CreateEMEventPhoton, processEvent_SWT_Cent_Qvec, "process event info", false);
+  // void processEvent_SWT_Cent_Qvec(MyCollisionsWithSWT_Cent_Qvec const& collisions, MyBCs const& bcs)
+  // {
+  //   skimEvent<false, true, EMEventType::kEvent_Cent_Qvec>(collisions, bcs);
+  // }
+  // PROCESS_SWITCH(CreateEMEventPhoton, processEvent_SWT_Cent_Qvec, "process event info", false);
 
   // for MC
   void processEventMC(MyCollisionsMC const& collisions, MyBCs const& bcs)
@@ -359,16 +357,16 @@ struct CreateEMEventPhoton {
 };
 struct AssociatePhotonToEMEvent {
   Produces<o2::aod::V0KFEMEventIds> v0kfeventid;
-  Produces<o2::aod::EMPrimaryElectronEMEventIds> prmeleventid;
+  Produces<o2::aod::EMPrimaryElectronDaEMEventIds> prmeleventid;
   Produces<o2::aod::PHOSEMEventIds> phoseventid;
   Produces<o2::aod::EMCEMEventIds> emceventid;
-  Produces<o2::aod::EMPrimaryTrackEMEventIds> prmtrackeventid;
+  // Produces<o2::aod::EMPrimaryTrackEMEventIds> prmtrackeventid;
 
   Preslice<aod::V0PhotonsKF> perCollisionPCM = aod::v0photonkf::collisionId;
   PresliceUnsorted<aod::EMPrimaryElectronsFromDalitz> perCollisionEl = aod::emprimaryelectron::collisionId;
   Preslice<aod::PHOSClusters> perCollisionPHOS = aod::skimmedcluster::collisionId;
   Preslice<aod::SkimEMCClusters> perCollisionEMC = aod::skimmedcluster::collisionId;
-  Preslice<aod::EMPrimaryTracks> perCollision_track = aod::emprimarytrack::collisionId;
+  // Preslice<aod::EMPrimaryTracks> perCollision_track = aod::emprimarytrack::collisionId;
 
   void init(o2::framework::InitContext&) {}
 
@@ -387,38 +385,38 @@ struct AssociatePhotonToEMEvent {
   // This struct is for both data and MC.
   // Note that reconstructed collisions without mc collisions are already rejected in CreateEMEventPhoton in MC.
 
-  void processPCM(aod::EMEvents const& collisions, aod::V0PhotonsKF const& photons)
+  void processPCM(aod::PMEvents const& collisions, aod::V0PhotonsKF const& photons)
   {
     fillEventId(collisions, photons, v0kfeventid, perCollisionPCM);
   }
 
-  void processElectronFromDalitz(aod::EMEvents const& collisions, aod::EMPrimaryElectronsFromDalitz const& tracks)
+  void processElectronFromDalitz(aod::PMEvents const& collisions, aod::EMPrimaryElectronsFromDalitz const& tracks)
   {
     fillEventId(collisions, tracks, prmeleventid, perCollisionEl);
   }
 
-  void processPHOS(aod::EMEvents const& collisions, aod::PHOSClusters const& photons)
+  void processPHOS(aod::PMEvents const& collisions, aod::PHOSClusters const& photons)
   {
     fillEventId(collisions, photons, phoseventid, perCollisionPHOS);
   }
 
-  void processEMC(aod::EMEvents const& collisions, aod::SkimEMCClusters const& photons)
+  void processEMC(aod::PMEvents const& collisions, aod::SkimEMCClusters const& photons)
   {
     fillEventId(collisions, photons, emceventid, perCollisionEMC);
   }
 
-  void processChargedTrack(aod::EMEvents const& collisions, aod::EMPrimaryTracks const& tracks)
-  {
-    fillEventId(collisions, tracks, prmtrackeventid, perCollision_track);
-  }
+  // void processChargedTrack(aod::PMEvents const& collisions, aod::EMPrimaryTracks const& tracks)
+  // {
+  //   fillEventId(collisions, tracks, prmtrackeventid, perCollision_track);
+  // }
 
-  void processDummy(aod::EMEvents const&) {}
+  void processDummy(aod::PMEvents const&) {}
 
   PROCESS_SWITCH(AssociatePhotonToEMEvent, processPCM, "process pcm-event indexing", false);
   PROCESS_SWITCH(AssociatePhotonToEMEvent, processElectronFromDalitz, "process dalitzee-event indexing", false);
   PROCESS_SWITCH(AssociatePhotonToEMEvent, processPHOS, "process phos-event indexing", false);
   PROCESS_SWITCH(AssociatePhotonToEMEvent, processEMC, "process emc-event indexing", false);
-  PROCESS_SWITCH(AssociatePhotonToEMEvent, processChargedTrack, "process indexing for charged tracks", false);
+  // PROCESS_SWITCH(AssociatePhotonToEMEvent, processChargedTrack, "process indexing for charged tracks", false);
   PROCESS_SWITCH(AssociatePhotonToEMEvent, processDummy, "process dummy", true);
 };
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)

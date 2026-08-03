@@ -21,9 +21,19 @@ o2physics_add_dpl_workflow(tree-creator-electron-ml-dda
                     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::EventFilteringUtils
                     COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(tree-creator-muon-ml
+                    SOURCES treeCreatorMuonML.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2::GlobalTracking
+                    COMPONENT_NAME Analysis)
+
 o2physics_add_dpl_workflow(skimmer-primary-electron
                     SOURCES skimmerPrimaryElectron.cxx
                     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::MLCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(skimmer-primary-electron-sv
+                    SOURCES skimmerPrimaryElectronSV.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DCAFitter O2Physics::AnalysisCore O2Physics::MLCore
                     COMPONENT_NAME Analysis)
 
 o2physics_add_dpl_workflow(skimmer-primary-electron-qc
@@ -36,9 +46,19 @@ o2physics_add_dpl_workflow(skimmer-primary-muon
                     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2::GlobalTracking
                     COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(skimmer-primary-muon-qc
+                    SOURCES skimmerPrimaryMuonQC.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2::GlobalTracking
+                    COMPONENT_NAME Analysis)
+
 o2physics_add_dpl_workflow(skimmer-primary-track
                     SOURCES skimmerPrimaryTrack.cxx
                     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(skimmer-primary-mfttrack
+                    SOURCES skimmerPrimaryMFTTrack.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2::GlobalTracking
                     COMPONENT_NAME Analysis)
 
 o2physics_add_dpl_workflow(create-emevent-dilepton
@@ -66,18 +86,27 @@ o2physics_add_dpl_workflow(filter-eoi
                     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
                     COMPONENT_NAME Analysis)
 
-o2physics_add_dpl_workflow(dielectron-producer
-                    SOURCES dielectronProducer.cxx
-                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::PWGEMDileptonCore
-                    COMPONENT_NAME Analysis)
-
-o2physics_add_dpl_workflow(dimuon-producer
-                    SOURCES dimuonProducer.cxx
-                    PUBLIC_LINK_LIBRARIES O2::Framework O2::DetectorsBase O2Physics::AnalysisCore O2Physics::PWGEMDileptonCore
-                    COMPONENT_NAME Analysis)
-
 o2physics_add_dpl_workflow(qvector-dummy-otf
                     SOURCES qVectorDummyOTF.cxx
                     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
                     COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(qvector2-dummy-otf
+                    SOURCES qVector2DummyOTF.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(qvector3-dummy-otf
+                    SOURCES qVector3DummyOTF.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(prefilter-dielectron
+                    SOURCES prefilterDielectron.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGEMDileptonCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(prefilter-dimuon
+                    SOURCES prefilterDimuon.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGEMDileptonCore
+                    COMPONENT_NAME Analysis)

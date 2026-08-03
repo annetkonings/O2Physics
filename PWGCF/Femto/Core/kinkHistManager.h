@@ -21,20 +21,23 @@
 #include "PWGCF/Femto/Core/modes.h"
 #include "PWGCF/Femto/Core/trackHistManager.h"
 
-#include "CommonConstants/MathConstants.h"
-#include "Framework/Configurable.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/HistogramSpec.h"
+#include <CommonConstants/MathConstants.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/Logger.h>
+
+#include <TH1.h>
+#include <TPDGCode.h>
 
 #include <array>
+#include <cstddef>
 #include <map>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace o2::analysis::femto
-{
-namespace kinkhistmanager
+namespace o2::analysis::femto::kinkhistmanager
 {
 // enum for kink histograms
 enum KinkHist {
@@ -83,24 +86,26 @@ enum KinkHist {
 
 constexpr std::size_t MaxSecondary = 3;
 
-#define KINK_DEFAULT_BINNING(defaultMassMin, defaultMassMax)                                       \
-  o2::framework::ConfigurableAxis pt{"pt", {{600, 0, 6}}, "Pt"};                                   \
-  o2::framework::ConfigurableAxis eta{"eta", {{300, -1.5, 1.5}}, "Eta"};                           \
-  o2::framework::ConfigurableAxis phi{"phi", {{720, 0, 1.f * o2::constants::math::TwoPI}}, "Phi"}; \
-  o2::framework::ConfigurableAxis mass{"mass", {{200, defaultMassMin, defaultMassMax}}, "Mass"};   \
-  o2::framework::ConfigurableAxis sign{"sign", {{3, -1.5, 1.5}}, "Sign"};                          \
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define KINK_DEFAULT_BINNING(defaultMassMin, defaultMassMax)                                         \
+  o2::framework::ConfigurableAxis pt{"pt", {{600, 0, 6}}, "Pt"};                                     \
+  o2::framework::ConfigurableAxis eta{"eta", {{300, -1.5, 1.5}}, "Eta"};                             \
+  o2::framework::ConfigurableAxis phi{"phi", {{720, 0, 1.f * o2::constants::math::TwoPI}}, "Phi"};   \
+  o2::framework::ConfigurableAxis mass{"mass", {{200, (defaultMassMin), (defaultMassMax)}}, "Mass"}; \
+  o2::framework::ConfigurableAxis sign{"sign", {{3, -1.5, 1.5}}, "Sign"};                            \
   o2::framework::ConfigurableAxis pdgCodes{"pdgCodes", {{8001, -4000.5, 4000.5}}, "PDG codes of selected V0s"};
 
-template <const char* Prefix>
+template <auto& Prefix>
 struct ConfSigmaBinning : o2::framework::ConfigurableGroup {
   std::string prefix = Prefix;
   KINK_DEFAULT_BINNING(1.1, 1.3)
 };
-template <const char* Prefix>
+template <auto& Prefix>
 struct ConfSigmaPlusBinning : o2::framework::ConfigurableGroup {
   std::string prefix = Prefix;
   KINK_DEFAULT_BINNING(1.1, 1.3)
 };
+
 #undef KINK_DEFAULT_BINNING
 
 constexpr const char PrefixSigmaBinning1[] = "SigmaBinning1";
@@ -109,7 +114,7 @@ using ConfSigmaBinning1 = ConfSigmaBinning<PrefixSigmaBinning1>;
 constexpr const char PrefixSigmaPlusBinning1[] = "SigmaPlusBinning1";
 using ConfSigmaPlusBinning1 = ConfSigmaPlusBinning<PrefixSigmaPlusBinning1>;
 
-template <const char* Prefix>
+template <auto& Prefix>
 struct ConfKinkQaBinning : o2::framework::ConfigurableGroup {
   std::string prefix = Prefix;
   o2::framework::Configurable<bool> plot2d{"plot2d", true, "Enable 2d QA h histograms"};
@@ -131,109 +136,113 @@ using ConfSigmaPlusQaBinning1 = ConfKinkQaBinning<PrefixSigmaPlusQaBinning1>;
 // must be in sync with enum KinkHist
 // the enum gives the correct index in the array
 constexpr std::array<histmanager::HistInfo<KinkHist>, kKinkHistLast> HistTable = {
-  {{kPt, o2::framework::kTH1F, "hPt", "Transverse Momentum; p_{T} (GeV/#it{c}); Entries"},
-   {kEta, o2::framework::kTH1F, "hEta", "Pseudorapidity; #eta; Entries"},
-   {kPhi, o2::framework::kTH1F, "hPhi", "Azimuthal angle; #varphi; Entries"},
-   {kMass, o2::framework::kTH1F, "hMass", "Invariant Mass; m_{Inv} (GeV/#it{c}^{2}); Entries"},
-   {kSign, o2::framework::kTH1F, "hSign", "Sign; sign; Entries"},
-   {kKinkAngle, o2::framework::kTH1F, "hKinkAngle", "Kink Angle; Angle (rad); Entries"},
-   {kDcaMothToPV, o2::framework::kTH1F, "hDcaMothToPV", "Mother DCA to PV; DCA (cm); Entries"},
-   {kDcaDaugToPV, o2::framework::kTH1F, "hDcaDaugToPV", "Daughter DCA to PV; DCA (cm); Entries"},
-   {kDecayVtxX, o2::framework::kTH1F, "hDecayVtxX", "Decay Vertex X; x (cm); Entries"},
-   {kDecayVtxY, o2::framework::kTH1F, "hDecayVtxY", "Decay Vertex Y; y (cm); Entries"},
-   {kDecayVtxZ, o2::framework::kTH1F, "hDecayVtxZ", "Decay Vertex Z; z (cm); Entries"},
-   {kDecayVtx, o2::framework::kTH1F, "hDecayVtx", "Decay Distance from PV; r (cm); Entries"},
-   {kTransRadius, o2::framework::kTH1F, "hTransRadius", "Transverse Decay Radius; r_{xy} (cm); Entries"},
-   {kPtVsEta, o2::framework::kTH2F, "hPtVsEta", "p_{T} vs #eta; p_{T} (GeV/#it{c}); #eta"},
-   {kPtVsPhi, o2::framework::kTH2F, "hPtVsPhi", "p_{T} vs #varphi; p_{T} (GeV/#it{c}); #varphi"},
-   {kPhiVsEta, o2::framework::kTH2F, "hPhiVsEta", "#varphi vs #eta; #varphi; #eta"},
-   {kPtVsKinkAngle, o2::framework::kTH2F, "hPtVsKinkAngle", "p_{T} vs kink angle; p_{T} (GeV/#it{c}); kink angle (rad)"},
-   {kPtVsDecayRadius, o2::framework::kTH2F, "hPtVsDecayRadius", "p_{T} vs transverse decay radius; p_{T} (GeV/#it{c}); r_{xy} (cm)"},
-   {kOrigin, o2::framework::kTH1F, "hOrigin", "Status Codes (=Origin); Status Code; Entries"},
-   {kPdg, o2::framework::kTH1F, "hPdg", "PDG Codes of reconstructed kinks; PDG Code; Entries"},
-   {kPdgMother, o2::framework::kTH1F, "hPdgMother", "PDG Codes of mother of reconstructed kink; PDG Code; Entries"},
-   {kPdgPartonicMother, o2::framework::kTH1F, "hPdgPartonicMother", "PDG Codes of partonic mother reconstructed knik; PDG Code; Entries"},
-   {kTruePt, o2::framework::kTH1F, "hTruePt", "True transverse momentum; p_{T} (GeV/#it{c}); Entries"},
-   {kTrueEta, o2::framework::kTH1F, "hTrueEta", "True pseudorapdity; #eta; Entries"},
-   {kTruePhi, o2::framework::kTH1F, "hTruePhi", "True azimuthal angle; #varphi; Entries"},
-   {kNoMcParticle, o2::framework::kTH2F, "hNoMcParticle", "Wrongly reconstructed particles; p_{T} (GeV/#it{c}); cos(#alpha)"},
-   {kPrimary, o2::framework::kTH2F, "hPrimary", "Primary particles; p_{T} (GeV/#it{c}); kink angle"},
-   {kFromWrongCollision, o2::framework::kTH2F, "hFromWrongCollision", "Particles associated to wrong collision; p_{T} (GeV/#it{c}); kink angle"},
-   {kFromMaterial, o2::framework::kTH2F, "hFromMaterial", "Particles from material; p_{T} (GeV/#it{c}); kink angle"},
-   {kMissidentified, o2::framework::kTH2F, "hMissidentified", "Missidentified particles (fake/wrong PDG code); p_{T} (GeV/#it{c}); kink angle"},
-   {kSecondary1, o2::framework::kTH2F, "hFromSecondary1", "Particles from secondary decay; p_{T} (GeV/#it{c}); kink angle"},
-   {kSecondary2, o2::framework::kTH2F, "hFromSecondary2", "Particles from seconary decay; p_{T} (GeV/#it{c}); kink angle"},
-   {kSecondary3, o2::framework::kTH2F, "hFromSecondary3", "Particles from seconary decay; p_{T} (GeV/#it{c}); kink angle"},
-   {kSecondaryOther, o2::framework::kTH2F, "hFromSecondaryOther", "Particles from every other seconary decay; p_{T} (GeV/#it{c}); kink angle"}}};
+  {{kPt, o2::framework::HistType::kTH1F, "hPt", "Transverse Momentum; p_{T} (GeV/#it{c}); Entries"},
+   {kEta, o2::framework::HistType::kTH1F, "hEta", "Pseudorapidity; #eta; Entries"},
+   {kPhi, o2::framework::HistType::kTH1F, "hPhi", "Azimuthal angle; #varphi; Entries"},
+   {kMass, o2::framework::HistType::kTH1F, "hMass", "Invariant Mass; m_{Inv} (GeV/#it{c}^{2}); Entries"},
+   {kSign, o2::framework::HistType::kTH1F, "hSign", "Sign; sign; Entries"},
+   {kKinkAngle, o2::framework::HistType::kTH1F, "hKinkAngle", "Kink Angle; Angle (rad); Entries"},
+   {kDcaMothToPV, o2::framework::HistType::kTH1F, "hDcaMothToPV", "Mother DCA to PV; DCA (cm); Entries"},
+   {kDcaDaugToPV, o2::framework::HistType::kTH1F, "hDcaDaugToPV", "Daughter DCA to PV; DCA (cm); Entries"},
+   {kDecayVtxX, o2::framework::HistType::kTH1F, "hDecayVtxX", "Decay Vertex X; x (cm); Entries"},
+   {kDecayVtxY, o2::framework::HistType::kTH1F, "hDecayVtxY", "Decay Vertex Y; y (cm); Entries"},
+   {kDecayVtxZ, o2::framework::HistType::kTH1F, "hDecayVtxZ", "Decay Vertex Z; z (cm); Entries"},
+   {kDecayVtx, o2::framework::HistType::kTH1F, "hDecayVtx", "Decay Distance from PV; r (cm); Entries"},
+   {kTransRadius, o2::framework::HistType::kTH1F, "hTransRadius", "Transverse Decay Radius; r_{xy} (cm); Entries"},
+   {kPtVsEta, o2::framework::HistType::kTH2F, "hPtVsEta", "p_{T} vs #eta; p_{T} (GeV/#it{c}); #eta"},
+   {kPtVsPhi, o2::framework::HistType::kTH2F, "hPtVsPhi", "p_{T} vs #varphi; p_{T} (GeV/#it{c}); #varphi"},
+   {kPhiVsEta, o2::framework::HistType::kTH2F, "hPhiVsEta", "#varphi vs #eta; #varphi; #eta"},
+   {kPtVsKinkAngle, o2::framework::HistType::kTH2F, "hPtVsKinkAngle", "p_{T} vs kink angle; p_{T} (GeV/#it{c}); kink angle (rad)"},
+   {kPtVsDecayRadius, o2::framework::HistType::kTH2F, "hPtVsDecayRadius", "p_{T} vs transverse decay radius; p_{T} (GeV/#it{c}); r_{xy} (cm)"},
+   {kOrigin, o2::framework::HistType::kTH1F, "hOrigin", "Status Codes (=Origin); Status Code; Entries"},
+   {kPdg, o2::framework::HistType::kTH1F, "hPdg", "PDG Codes of reconstructed kinks; PDG Code; Entries"},
+   {kPdgMother, o2::framework::HistType::kTH1F, "hPdgMother", "PDG Codes of mother of reconstructed kink; PDG Code; Entries"},
+   {kPdgPartonicMother, o2::framework::HistType::kTH1F, "hPdgPartonicMother", "PDG Codes of partonic mother reconstructed knik; PDG Code; Entries"},
+   {kTruePt, o2::framework::HistType::kTH1F, "hTruePt", "True transverse momentum; p_{T} (GeV/#it{c}); Entries"},
+   {kTrueEta, o2::framework::HistType::kTH1F, "hTrueEta", "True pseudorapdity; #eta; Entries"},
+   {kTruePhi, o2::framework::HistType::kTH1F, "hTruePhi", "True azimuthal angle; #varphi; Entries"},
+   {kNoMcParticle, o2::framework::HistType::kTH2F, "hNoMcParticle", "Wrongly reconstructed particles; p_{T} (GeV/#it{c}); cos(#alpha)"},
+   {kPrimary, o2::framework::HistType::kTH2F, "hPrimary", "Primary particles; p_{T} (GeV/#it{c}); kink angle"},
+   {kFromWrongCollision, o2::framework::HistType::kTH2F, "hFromWrongCollision", "Particles associated to wrong collision; p_{T} (GeV/#it{c}); kink angle"},
+   {kFromMaterial, o2::framework::HistType::kTH2F, "hFromMaterial", "Particles from material; p_{T} (GeV/#it{c}); kink angle"},
+   {kMissidentified, o2::framework::HistType::kTH2F, "hMissidentified", "Missidentified particles (fake/wrong PDG code); p_{T} (GeV/#it{c}); kink angle"},
+   {kSecondary1, o2::framework::HistType::kTH2F, "hFromSecondary1", "Particles from secondary decay; p_{T} (GeV/#it{c}); kink angle"},
+   {kSecondary2, o2::framework::HistType::kTH2F, "hFromSecondary2", "Particles from seconary decay; p_{T} (GeV/#it{c}); kink angle"},
+   {kSecondary3, o2::framework::HistType::kTH2F, "hFromSecondary3", "Particles from seconary decay; p_{T} (GeV/#it{c}); kink angle"},
+   {kSecondaryOther, o2::framework::HistType::kTH2F, "hFromSecondaryOther", "Particles from every other seconary decay; p_{T} (GeV/#it{c}); kink angle"}}};
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define KINK_HIST_ANALYSIS_MAP(conf) \
-  {kPt, {conf.pt}},                  \
-    {kEta, {conf.eta}},              \
-    {kPhi, {conf.phi}},              \
-    {kMass, {conf.mass}},            \
-    {kSign, {conf.sign}},
+  {kPt, {(conf).pt}},                \
+    {kEta, {(conf).eta}},            \
+    {kPhi, {(conf).phi}},            \
+    {kMass, {(conf).mass}},          \
+    {kSign, {(conf).sign}},
 
-#define KINK_HIST_MC_MAP(conf)     \
-  {kTruePt, {conf.pt}},            \
-    {kTrueEta, {conf.eta}},        \
-    {kTruePhi, {conf.phi}},        \
-    {kPdg, {conf.pdgCodes}},       \
-    {kPdgMother, {conf.pdgCodes}}, \
-    {kPdgPartonicMother, {conf.pdgCodes}},
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define KINK_HIST_MC_MAP(conf)       \
+  {kTruePt, {(conf).pt}},            \
+    {kTrueEta, {(conf).eta}},        \
+    {kTruePhi, {(conf).phi}},        \
+    {kPdg, {(conf).pdgCodes}},       \
+    {kPdgMother, {(conf).pdgCodes}}, \
+    {kPdgPartonicMother, {(conf).pdgCodes}},
 
-#define KINK_HIST_QA_MAP(confAnalysis, confQa)             \
-  {kKinkAngle, {confQa.kinkAngle}},                        \
-    {kDcaMothToPV, {confQa.dcaMothToPV}},                  \
-    {kDcaDaugToPV, {confQa.dcaDaugToPV}},                  \
-    {kDecayVtxX, {confQa.decayVertex}},                    \
-    {kDecayVtxY, {confQa.decayVertex}},                    \
-    {kDecayVtxZ, {confQa.decayVertex}},                    \
-    {kDecayVtx, {confQa.decayVertex}},                     \
-    {kTransRadius, {confQa.transRadius}},                  \
-    {kPtVsEta, {confAnalysis.pt, confAnalysis.eta}},       \
-    {kPtVsPhi, {confAnalysis.pt, confAnalysis.phi}},       \
-    {kPhiVsEta, {confAnalysis.phi, confAnalysis.eta}},     \
-    {kPtVsKinkAngle, {confAnalysis.pt, confQa.kinkAngle}}, \
-    {kPtVsDecayRadius, {confAnalysis.pt, confQa.transRadius}},
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define KINK_HIST_QA_MAP(confAnalysis, confQa)                 \
+  {kKinkAngle, {(confQa).kinkAngle}},                          \
+    {kDcaMothToPV, {(confQa).dcaMothToPV}},                    \
+    {kDcaDaugToPV, {(confQa).dcaDaugToPV}},                    \
+    {kDecayVtxX, {(confQa).decayVertex}},                      \
+    {kDecayVtxY, {(confQa).decayVertex}},                      \
+    {kDecayVtxZ, {(confQa).decayVertex}},                      \
+    {kDecayVtx, {(confQa).decayVertex}},                       \
+    {kTransRadius, {(confQa).transRadius}},                    \
+    {kPtVsEta, {(confAnalysis).pt, (confAnalysis).eta}},       \
+    {kPtVsPhi, {(confAnalysis).pt, (confAnalysis).phi}},       \
+    {kPhiVsEta, {(confAnalysis).phi, (confAnalysis).eta}},     \
+    {kPtVsKinkAngle, {(confAnalysis).pt, (confQa).kinkAngle}}, \
+    {kPtVsDecayRadius, {(confAnalysis).pt, (confQa).transRadius}},
 
-#define KINK_HIST_MC_QA_MAP(confAnalysis, confQa)               \
-  {kNoMcParticle, {confAnalysis.pt, confQa.kinkAngle}},         \
-    {kPrimary, {confAnalysis.pt, confQa.kinkAngle}},            \
-    {kFromWrongCollision, {confAnalysis.pt, confQa.kinkAngle}}, \
-    {kFromMaterial, {confAnalysis.pt, confQa.kinkAngle}},       \
-    {kMissidentified, {confAnalysis.pt, confQa.kinkAngle}},     \
-    {kSecondary1, {confAnalysis.pt, confQa.kinkAngle}},         \
-    {kSecondary2, {confAnalysis.pt, confQa.kinkAngle}},         \
-    {kSecondary3, {confAnalysis.pt, confQa.kinkAngle}},         \
-    {kSecondaryOther, {confAnalysis.pt, confQa.kinkAngle}},
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define KINK_HIST_MC_QA_MAP(confAnalysis, confQa)                   \
+  {kNoMcParticle, {(confAnalysis).pt, (confQa).kinkAngle}},         \
+    {kPrimary, {(confAnalysis).pt, (confQa).kinkAngle}},            \
+    {kFromWrongCollision, {(confAnalysis).pt, (confQa).kinkAngle}}, \
+    {kFromMaterial, {(confAnalysis).pt, (confQa).kinkAngle}},       \
+    {kMissidentified, {(confAnalysis).pt, (confQa).kinkAngle}},     \
+    {kSecondary1, {(confAnalysis).pt, (confQa).kinkAngle}},         \
+    {kSecondary2, {(confAnalysis).pt, (confQa).kinkAngle}},         \
+    {kSecondary3, {(confAnalysis).pt, (confQa).kinkAngle}},         \
+    {kSecondaryOther, {(confAnalysis).pt, (confQa).kinkAngle}},
 
 template <typename T>
 auto makeKinkHistSpecMap(const T& confBinningAnalysis)
 {
-  return std::map<KinkHist, std::vector<framework::AxisSpec>>{
+  return std::map<KinkHist, std::vector<o2::framework::AxisSpec>>{
     KINK_HIST_ANALYSIS_MAP(confBinningAnalysis)};
 }
 
 template <typename T>
 auto makeKinkMcHistSpecMap(const T& confBinningAnalysis)
 {
-  return std::map<KinkHist, std::vector<framework::AxisSpec>>{
+  return std::map<KinkHist, std::vector<o2::framework::AxisSpec>>{
     KINK_HIST_ANALYSIS_MAP(confBinningAnalysis)
       KINK_HIST_MC_MAP(confBinningAnalysis)};
 }
 
 template <typename T1, typename T2>
-std::map<KinkHist, std::vector<framework::AxisSpec>> makeKinkQaHistSpecMap(T1 const& confBinningAnalysis, T2 const& confBinningQa)
+std::map<KinkHist, std::vector<o2::framework::AxisSpec>> makeKinkQaHistSpecMap(T1 const& confBinningAnalysis, T2 const& confBinningQa)
 {
-  return std::map<KinkHist, std::vector<framework::AxisSpec>>{
+  return std::map<KinkHist, std::vector<o2::framework::AxisSpec>>{
     KINK_HIST_ANALYSIS_MAP(confBinningAnalysis)
       KINK_HIST_QA_MAP(confBinningAnalysis, confBinningQa)};
 }
 
 template <typename T1, typename T2>
-std::map<KinkHist, std::vector<framework::AxisSpec>> makeKinkMcQaHistSpecMap(T1 const& confBinningAnalysis, T2 const& confBinningQa)
+std::map<KinkHist, std::vector<o2::framework::AxisSpec>> makeKinkMcQaHistSpecMap(T1 const& confBinningAnalysis, T2 const& confBinningQa)
 {
-  return std::map<KinkHist, std::vector<framework::AxisSpec>>{
+  return std::map<KinkHist, std::vector<o2::framework::AxisSpec>>{
     KINK_HIST_ANALYSIS_MAP(confBinningAnalysis)
       KINK_HIST_QA_MAP(confBinningAnalysis, confBinningQa)
         KINK_HIST_MC_MAP(confBinningAnalysis)
@@ -252,14 +261,14 @@ constexpr char PrefixSigmaPlusQa[] = "SigmaPlusQA/";
 constexpr char PrefixSigmaPlus1[] = "SigmaPlus1/";
 constexpr char PrefixSigmaPlus2[] = "SigmaPlus2/";
 
-constexpr std::string_view AnalysisDir = "Kinematics/";
+constexpr std::string_view AnalysisDir = "Analysis/";
 constexpr std::string_view QaDir = "QA/";
 constexpr std::string_view McDir = "MC/";
 
 constexpr int AbsChargeDaughters = 1;
 
-template <const char* kinkPrefix,
-          const char* chaDauPrefix,
+template <auto& kinkPrefix,
+          auto& chaDauPrefix,
           modes::Kink kink>
 class KinkHistManager
 {
@@ -302,7 +311,7 @@ class KinkHistManager
     }
 
     mChaDauManager.template init<mode>(registry, ChaDauSpecs, absCharge, chaDauCharge, chaDauPdgCodeAbs);
-    if constexpr (isFlagSet(mode, modes::Mode::kAnalysis)) {
+    if constexpr (isFlagSet(mode, modes::Mode::kReco)) {
       this->initAnalysis(KinkSpecs);
     }
     if constexpr (isFlagSet(mode, modes::Mode::kQa)) {
@@ -351,7 +360,7 @@ class KinkHistManager
     }
 
     mChaDauManager.template init<mode>(registry, ChaDauSpecs, absCharge, chaDauCharge, chaDauPdgCodeAbs, ConfChaDauBinningQa);
-    if constexpr (isFlagSet(mode, modes::Mode::kAnalysis)) {
+    if constexpr (isFlagSet(mode, modes::Mode::kReco)) {
       this->initAnalysis(KinkSpecs);
     }
     if constexpr (isFlagSet(mode, modes::Mode::kQa)) {
@@ -369,7 +378,7 @@ class KinkHistManager
     // auto chaDaughter = kinkcandidate.template chaDau_as<T2>();
     auto chaDaughter = tracks.rawIteratorAt(kinkCandidate.chaDauId() - tracks.offset());
     mChaDauManager.template fill<mode>(chaDaughter, tracks);
-    if constexpr (isFlagSet(mode, modes::Mode::kAnalysis)) {
+    if constexpr (isFlagSet(mode, modes::Mode::kReco)) {
       this->fillAnalysis(kinkCandidate);
     }
     if constexpr (isFlagSet(mode, modes::Mode::kQa)) {
@@ -382,7 +391,7 @@ class KinkHistManager
   {
     auto chaDaughter = tracks.rawIteratorAt(kinkCandidate.chaDauId() - tracks.offset());
     mChaDauManager.template fill<mode>(chaDaughter, tracks, mcParticles, mcMothers, mcPartonicMothers);
-    if constexpr (modes::isFlagSet(mode, modes::Mode::kAnalysis)) {
+    if constexpr (modes::isFlagSet(mode, modes::Mode::kReco)) {
       this->fillAnalysis(kinkCandidate);
     }
     if constexpr (modes::isFlagSet(mode, modes::Mode::kQa)) {
@@ -450,7 +459,7 @@ class KinkHistManager
     mHistogramRegistry->add(mcDir + getHistNameV2(kTruePhi, HistTable), getHistDesc(kTruePhi, HistTable), getHistType(kTruePhi, HistTable), {KinkSpecs.at(kTruePhi)});
 
     // mc origin can be configured here
-    const framework::AxisSpec axisOrigin = {static_cast<int>(modes::McOrigin::kMcOriginLast), -0.5, static_cast<double>(modes::McOrigin::kMcOriginLast) - 0.5};
+    const o2::framework::AxisSpec axisOrigin = {static_cast<int>(modes::McOrigin::kMcOriginLast), -0.5, static_cast<double>(modes::McOrigin::kMcOriginLast) - 0.5};
     mHistogramRegistry->add(mcDir + getHistNameV2(kOrigin, HistTable), getHistDesc(kOrigin, HistTable), getHistType(kOrigin, HistTable), {axisOrigin});
     mHistogramRegistry->get<TH1>(HIST(kinkPrefix) + HIST(McDir) + HIST(histmanager::getHistName(kOrigin, HistTable)))->GetXaxis()->SetBinLabel(1 + static_cast<int>(modes::McOrigin::kNoMcParticle), modes::mcOriginToString(modes::McOrigin::kNoMcParticle));
     mHistogramRegistry->get<TH1>(HIST(kinkPrefix) + HIST(McDir) + HIST(histmanager::getHistName(kOrigin, HistTable)))->GetXaxis()->SetBinLabel(1 + static_cast<int>(modes::McOrigin::kFromWrongCollision), modes::mcOriginToString(modes::McOrigin::kFromWrongCollision));
@@ -554,16 +563,16 @@ class KinkHistManager
     mHistogramRegistry->fill(HIST(kinkPrefix) + HIST(McDir) + HIST(getHistName(kPdg, HistTable)), mcParticle.pdgCode());
 
     // get mother
-    if (kinkCandidate.has_fMcMother()) {
-      auto mother = kinkCandidate.template fMcMother_as<T3>();
+    if (mcParticle.has_fMcMother()) {
+      auto mother = mcParticle.template fMcMother_as<T3>();
       mHistogramRegistry->fill(HIST(kinkPrefix) + HIST(McDir) + HIST(getHistName(kPdgMother, HistTable)), mother.pdgCode());
     } else {
       mHistogramRegistry->fill(HIST(kinkPrefix) + HIST(McDir) + HIST(getHistName(kPdgMother, HistTable)), 0);
     }
 
     // get partonic mother
-    if (kinkCandidate.has_fMcPartMoth()) {
-      auto partonicMother = kinkCandidate.template fMcPartMoth_as<T4>();
+    if (mcParticle.has_fMcPartMoth()) {
+      auto partonicMother = mcParticle.template fMcPartMoth_as<T4>();
       mHistogramRegistry->fill(HIST(kinkPrefix) + HIST(McDir) + HIST(getHistName(kPdgPartonicMother, HistTable)), partonicMother.pdgCode());
     } else {
       mHistogramRegistry->fill(HIST(kinkPrefix) + HIST(McDir) + HIST(getHistName(kPdgPartonicMother, HistTable)), 0);
@@ -588,8 +597,8 @@ class KinkHistManager
               mHistogramRegistry->fill(HIST(kinkPrefix) + HIST(McDir) + HIST(getHistName(kFromMaterial, HistTable)), kinkCandidate.pt(), kinkCandidate.kinkAngle());
               break;
             case modes::McOrigin::kFromSecondaryDecay:
-              if (kinkCandidate.has_fMcMother()) {
-                auto mother = kinkCandidate.template fMcMother_as<T3>();
+              if (mcParticle.has_fMcMother()) {
+                auto mother = mcParticle.template fMcMother_as<T3>();
                 int motherPdgCode = std::abs(mother.pdgCode());
                 // Switch on PDG of the mother
                 if (mPlotNSecondaries >= histmanager::kSecondaryPlotLevel1 && motherPdgCode == mPdgCodesSecondaryMother[0]) {
@@ -620,6 +629,5 @@ class KinkHistManager
   int mPlotNSecondaries = 0;
   std::array<int, MaxSecondary> mPdgCodesSecondaryMother = {0};
 };
-}; // namespace kinkhistmanager
-}; // namespace o2::analysis::femto
+}; // namespace o2::analysis::femto::kinkhistmanager
 #endif // PWGCF_FEMTO_CORE_KINKHISTMANAGER_H_

@@ -13,44 +13,40 @@
 /// \file jetChargedV2.cxx
 /// \brief This file contains the implementation for the Charged Jet v2 analysis in the ALICE experiment
 
-#include "PWGJE/Core/FastJetUtilities.h"
 #include "PWGJE/Core/JetDerivedDataUtilities.h"
-#include "PWGJE/Core/JetFinder.h"
 #include "PWGJE/Core/JetFindingUtilities.h"
 #include "PWGJE/DataModel/Jet.h"
+#include "PWGJE/DataModel/JetReducedData.h"
+#include "PWGJE/DataModel/JetSubtraction.h"
 
 #include "Common/Core/EventPlaneHelper.h"
-#include "Common/Core/TrackSelection.h"
-#include "Common/Core/TrackSelectionDefaults.h"
-#include "Common/DataModel/EventSelection.h"
+#include "Common/Core/RecoDecay.h"
 #include "Common/DataModel/Qvectors.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "EventFiltering/filterTables.h"
 
-#include "CommonConstants/PhysicsConstants.h"
-#include "Framework/ASoA.h"
-#include "Framework/ASoAHelpers.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/O2DatabasePDGPlugin.h"
-#include "Framework/RunningWorkflowInfo.h"
-#include "Framework/StaticFor.h"
-#include "Framework/runDataProcessing.h"
+#include <CommonConstants/MathConstants.h>
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
 
-#include <TComplex.h>
-#include <TH1F.h>
-#include <TH2D.h>
+#include <TH1.h>
 #include <THn.h>
-#include <THnSparse.h>
 #include <TMath.h>
 #include <TRandom3.h>
-#include <TVector2.h>
+#include <TString.h>
+
+#include <sys/types.h>
 
 #include <algorithm>
-#include <chrono>
+#include <array>
 #include <cmath>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace o2;
@@ -63,24 +59,27 @@ struct JetChargedV2 {
   using ChargedMCPMatchedJets = soa::Join<aod::ChargedMCParticleLevelJets, aod::ChargedMCParticleLevelJetConstituents, aod::ChargedMCParticleLevelJetsMatchedToChargedMCDetectorLevelJets>;
   using ChargedMCDMatchedJetsWeighted = soa::Join<aod::ChargedMCDetectorLevelJets, aod::ChargedMCDetectorLevelJetConstituents, aod::ChargedMCDetectorLevelJetsMatchedToChargedMCParticleLevelJets, aod::ChargedMCDetectorLevelJetEventWeights>;
   using ChargedMCPMatchedJetsWeighted = soa::Join<aod::ChargedMCParticleLevelJets, aod::ChargedMCParticleLevelJetConstituents, aod::ChargedMCParticleLevelJetsMatchedToChargedMCDetectorLevelJets, aod::ChargedMCParticleLevelJetEventWeights>;
+  using JetParticlesWithOriginal = soa::Join<aod::JetParticles, aod::JMcParticlePIs>;
 
   HistogramRegistry registry;
   HistogramRegistry histosQA{"histosQA", {}, OutputObjHandlingPolicy::AnalysisObject, false, false};
 
-  Configurable<int> centralityMode{"centralityMode", 0, "0 = FT0C (default), 1 = FT0M, 2 = FT0A"};
   Configurable<std::string> eventSelections{"eventSelections", "sel8", "choose event selection"};
-  Configurable<std::string> trackSelections{"trackSelections", "globalTracks", "set track selections"};
-  Configurable<std::vector<double>> jetRadii{"jetRadii", std::vector<double>{0.4}, "jet resolution parameters"};
-
   Configurable<float> vertexZCut{"vertexZCut", 10.0f, "Accepted z-vertex range"};
-  Configurable<float> trackDcaZmax{"trackDcaZmax", 99, "additional cut on dcaZ to PV for tracks; uniformTracks in particular don't cut on this at all"};
+  Configurable<int> centralityMode{"centralityMode", 0, "0 = FT0C (default), 1 = FT0M, 2 = FT0A"};
   Configurable<float> centralityMin{"centralityMin", -999.0, "minimum centrality"};
   Configurable<float> centralityMax{"centralityMax", 999.0, "maximum centrality"};
+
+  Configurable<std::string> trackSelections{"trackSelections", "globalTracks", "set track selections"};
+  Configurable<float> trackDcaZmax{"trackDcaZmax", 99, "additional cut on dcaZ to PV for tracks; uniformTracks in particular don't cut on this at all"};
+  Configurable<int> trackOccupancyInTimeRangeMax{"trackOccupancyInTimeRangeMax", 999999, "maximum occupancy of tracks in neighbouring collisions in a given time range; only applied to reconstructed collisions (data and mcd jets), not mc collisions (mcp jets)"};
+  Configurable<int> trackOccupancyInTimeRangeMin{"trackOccupancyInTimeRangeMin", -999999, "minimum occupancy of tracks in neighbouring collisions in a given time range; only applied to reconstructed collisions (data and mcd jets), not mc collisions (mcp jets)"};
   Configurable<float> trackPtMin{"trackPtMin", 0.15, "minimum pT acceptance for tracks"};
   Configurable<float> trackPtMax{"trackPtMax", 1000., "maximum pT acceptance for tracks"};
   Configurable<float> trackEtaMin{"trackEtaMin", -0.9, "minimum eta acceptance for tracks"};
   Configurable<float> trackEtaMax{"trackEtaMax", 0.9, "maximum eta acceptance for tracks"};
 
+  Configurable<float> selectedJetsRadius{"selectedJetsRadius", 0.2, "resolution parameter for histograms without radius"};
   Configurable<float> jetAreaFractionMin{"jetAreaFractionMin", -99.0, "used to make a cut on the jet areas"};
   Configurable<float> leadingConstituentPtMin{"leadingConstituentPtMin", -99.0, "minimum pT selection on jet constituent"};
   Configurable<float> leadingConstituentPtMax{"leadingConstituentPtMax", 9999.0, "maximum pT selection on jet constituent"};
@@ -89,23 +88,20 @@ struct JetChargedV2 {
   Configurable<float> jetEtaMin{"jetEtaMin", -0.9, "minimum eta acceptance for jets"};
   Configurable<float> jetEtaMax{"jetEtaMax", 0.9, "maximum eta acceptance for jets"};
   Configurable<int> nBinsEta{"nBinsEta", 200, "number of bins for eta axes"};
-  Configurable<float> jetRadius{"jetRadius", 0.2, "jet resolution parameters"};
   Configurable<float> randomConeLeadJetDeltaR{"randomConeLeadJetDeltaR", -99.0, "min distance between leading jet axis and random cone (RC) axis; if negative, min distance is set to automatic value of R_leadJet+R_RC "};
-
-  Configurable<float> localRhoFitPtMin{"localRhoFitPtMin", 0.2, "Minimum track pT used for local rho fluctuation fit"};
-  Configurable<float> localRhoFitPtMax{"localRhoFitPtMax", 5, "Maximum track pT used for local rho fluctuation fit"};
-
   Configurable<float> randomConeR{"randomConeR", 0.4, "size of random Cone for estimating background fluctuations"};
-  Configurable<int> trackOccupancyInTimeRangeMax{"trackOccupancyInTimeRangeMax", 999999, "maximum occupancy of tracks in neighbouring collisions in a given time range; only applied to reconstructed collisions (data and mcd jets), not mc collisions (mcp jets)"};
-  Configurable<int> trackOccupancyInTimeRangeMin{"trackOccupancyInTimeRangeMin", -999999, "minimum occupancy of tracks in neighbouring collisions in a given time range; only applied to reconstructed collisions (data and mcd jets), not mc collisions (mcp jets)"};
+
+  //=====================< tracking efficiency >=====================//
+  Configurable<float> pTHatExponent{"pTHatExponent", 6.0, "exponent of the event weight for the calculation of pTHat"};
 
   //=====================< evt pln >=====================//
-  Configurable<bool> cfgAddEvtSel{"cfgAddEvtSel", true, "event selection"};
   Configurable<std::vector<int>> cfgnMods{"cfgnMods", {2}, "Modulation of interest"};
   Configurable<int> cfgnTotalSystem{"cfgnTotalSystem", 7, "total qvector number"};
-  Configurable<std::string> cfgDetName{"cfgDetName", "FT0M", "The name of detector to be analyzed"};
+  Configurable<std::string> cfgDetName{"cfgDetName", "FT0C", "The name of detector to be analyzed"};
+  Configurable<std::string> cfgDetCheckName{"cfgDetCheckName", "FT0M", "The name of detector to be analyzed"};
   Configurable<std::string> cfgRefAName{"cfgRefAName", "TPCpos", "The name of detector for reference A"};
   Configurable<std::string> cfgRefBName{"cfgRefBName", "TPCneg", "The name of detector for reference B"};
+  Configurable<int> detCheck{"detCheck", 4, "total qvector number"};
 
   ConfigurableAxis cfgAxisQvecF{"cfgAxisQvecF", {300, -1, 1}, ""};
   ConfigurableAxis cfgAxisQvec{"cfgAxisQvec", {100, -3, 3}, ""};
@@ -115,16 +111,16 @@ struct JetChargedV2 {
 
   ConfigurableAxis cfgAxisEvtfit{"cfgAxisEvtfit", {10000, 0, 10000}, ""};
   EventPlaneHelper helperEP;
-  int detId;
-  int refAId;
-  int refBId;
+  int detId = 0;
+  int refAId = 0;
+  int refBId = 0;
+  int detIdCheck = 0;
 
   //=====================< jetSpectraConfig to this analysis >=====================//
-  Configurable<float> pTHatExponent{"pTHatExponent", 6.0, "exponent of the event weight for the calculation of pTHat"};
   Configurable<int> acceptSplitCollisions{"acceptSplitCollisions", 0, "0: only look at mcCollisions that are not split; 1: accept split mcCollisions, 2: accept split mcCollisions but only look at the first reco collision associated with it"};
   Configurable<float> pTHatAbsoluteMin{"pTHatAbsoluteMin", -99.0, "minimum value of pTHat"};
+  Configurable<bool> applyRCTSelections{"applyRCTSelections", true, "decide to apply RCT selections"};
   Configurable<bool> skipMBGapEvents{"skipMBGapEvents", false, "flag to choose to reject min. bias gap events; jet-level rejection can also be applied at the jet finder level for jets only, here rejection is applied for collision and track process functions for the first time, and on jets in case it was set to false at the jet finder level"};
-  Configurable<bool> checkMcCollisionIsMatched{"checkMcCollisionIsMatched", false, "0: count whole MCcollisions, 1: select MCcollisions which only have their correspond collisions"};
   Configurable<float> pTHatMaxMCD{"pTHatMaxMCD", 999.0, "maximum fraction of hard scattering for jet acceptance in detector MC"};
   Configurable<float> pTHatMaxMCP{"pTHatMaxMCP", 999.0, "maximum fraction of hard scattering for jet acceptance in particle MC"};
   Configurable<bool> checkLeadConstituentPtForMcpJets{"checkLeadConstituentPtForMcpJets", false, "flag to choose whether particle level jets should have their lead track pt above leadingConstituentPtMin to be accepted; off by default, as leadingConstituentPtMin cut is only applied on MCD jets for the Pb-Pb analysis using pp MC anchored to Pb-Pb for the response matrix"};
@@ -132,9 +128,8 @@ struct JetChargedV2 {
   Configurable<bool> subtractMCPBackground{"subtractMCPBackground", true, "subtract MCP Background with General Purpose anchored MC"};
   Configurable<bool> useMedianRho{"useMedianRho", false, "use median rho for subtract MCP Background"};
   Configurable<bool> useLocalRho{"useLocalRho", false, "use local rho for subtract MCP Background"};
+  Configurable<bool> isMCGenOnly{"isMCGenOnly", false, "analysis is run over mcGen only"};
 
-  float configSwitchLow = -98.0;
-  float configSwitchHigh = 9998.0;
   enum AcceptSplitCollisionsOptions {
     NonSplitOnly = 0,
     SplitOkCheckAnyAssocColl,      // 1
@@ -149,34 +144,34 @@ struct JetChargedV2 {
     }
     if (name.value == "FT0C") {
       return 0;
-    } else if (name.value == "FT0A") {
-      return 1;
-    } else if (name.value == "FT0M") {
-      return 2;
-    } else if (name.value == "FV0A") {
-      return 3;
-    } else if (name.value == "TPCpos" || name.value == "BPos") {
-      return 4;
-    } else if (name.value == "TPCneg" || name.value == "BNeg") {
-      return 5;
-    } else if (name.value == "TPCall" || name.value == "BTot") {
-      return 6;
-    } else {
-      return 0;
     }
+    if (name.value == "FT0A") {
+      return 1;
+    }
+    if (name.value == "FT0M") {
+      return 2;
+    }
+    if (name.value == "FV0A") {
+      return 3;
+    }
+    if (name.value == "TPCpos" || name.value == "BPos") {
+      return 4;
+    }
+    if (name.value == "TPCneg" || name.value == "BNeg") {
+      return 5;
+    }
+    if (name.value == "TPCall" || name.value == "BTot") {
+      return 6;
+    }
+    return 0;
   }
   //=====================< evt p615ln | end >=====================//
-
-  Configurable<float> selectedJetsRadius{"selectedJetsRadius", 0.2, "resolution parameter for histograms without radius"};
-
   std::vector<double> jetPtBins;
   std::vector<double> jetPtBinsRhoAreaSub;
 
   std::vector<int> eventSelectionBits;
   int trackSelection = -1;
   double evtnum = 0;
-  double accptTrack = 0;
-  double fitTrack = 0;
   float collQvecAmpDetId = 1e-8;
   TH1F* hPtsumSumptFit = nullptr;
   TH1F* hPtsumSumptFitMCP = nullptr;
@@ -184,23 +179,20 @@ struct JetChargedV2 {
   TF1* fFitModulationV2v3P = 0x0;
   TH1F* hPtsumSumptFitRM = nullptr;
   TF1* fFitModulationRM = 0x0;
+  TRandom3 randomNumber;
 
   void init(o2::framework::InitContext&)
   {
     detId = getDetId(cfgDetName);
+    detIdCheck = getDetId(cfgDetCheckName);
     refAId = getDetId(cfgRefAName);
     refBId = getDetId(cfgRefBName);
-    if (detId == refAId || detId == refBId || refAId == refBId) {
+    if (detId == refAId || detId == refBId || refAId == refBId || detId == detIdCheck) {
       LOGF(info, "Wrong detector configuration \n The FT0C will be used to get Q-Vector \n The TPCpos and TPCneg will be used as reference systems");
       detId = 0;
+      detIdCheck = 0;
       refAId = 4;
       refBId = 5;
-    }
-    auto jetRadiiBins = (std::vector<double>)jetRadii;
-    if (jetRadiiBins.size() > 1) {
-      jetRadiiBins.push_back(jetRadiiBins[jetRadiiBins.size() - 1] + (std::abs(jetRadiiBins[jetRadiiBins.size() - 1] - jetRadiiBins[jetRadiiBins.size() - 2])));
-    } else {
-      jetRadiiBins.push_back(jetRadiiBins[jetRadiiBins.size() - 1] + 0.1);
     }
 
     auto jetPtTemp = 0.0;
@@ -245,6 +237,7 @@ struct JetChargedV2 {
 
     eventSelectionBits = jetderiveddatautilities::initialiseEventSelectionBits(static_cast<std::string>(eventSelections));
     trackSelection = jetderiveddatautilities::initialiseTrackSelection(static_cast<std::string>(trackSelections));
+    randomNumber.SetSeed(0);
 
     if (doprocessCollisions || doprocessCollisionsWeighted) {
       registry.add("h_collisions", "number of events;event status;entries", {HistType::kTH1F, {{4, 0.0, 4.0}}});
@@ -318,11 +311,17 @@ struct JetChargedV2 {
         histosQA.add(Form("histEvtPlTwistV%d", cfgnMods->at(i)), "", {HistType::kTH2F, {axisEvtPl, axisCent}});
         histosQA.add(Form("histEvtPlFinalV%d", cfgnMods->at(i)), "", {HistType::kTH2F, {axisEvtPl, axisCent}});
 
+        histosQA.add(Form("h_ep2_FT0CV%d", cfgnMods->at(i)), "", {HistType::kTH2F, {axisEvtPl, axisCent}});
+        histosQA.add(Form("h_ep2_FT0MV%d", cfgnMods->at(i)), "", {HistType::kTH2F, {axisEvtPl, axisCent}});
+
         histosQA.add(Form("histEvtPlRes_SigRefAV%d", cfgnMods->at(i)), "", {HistType::kTH2F, {axisEvtPl, axisCent}});
         histosQA.add(Form("histEvtPlRes_SigRefBV%d", cfgnMods->at(i)), "", {HistType::kTH2F, {axisEvtPl, axisCent}});
         histosQA.add(Form("histEvtPlRes_RefARefBV%d", cfgnMods->at(i)), "", {HistType::kTH2F, {axisEvtPl, axisCent}});
       }
       histosQA.add("histCent", "Centrality TrkProcess", HistType::kTH1F, {axisCent});
+
+      histosQA.add("h2_ep2_FT0C_FT0M", "event_plane_FT0C_FT0M; FT0C; FT0M; cent", {HistType::kTH3F, {{100, -o2::constants::math::PIHalf, o2::constants::math::PIHalf}, {100, -o2::constants::math::PIHalf, o2::constants::math::PIHalf}, {100, 0.0, 100.0}}});
+      histosQA.add("h2_ep2_FT0C_FT0M_bumpRegion", "event_plane_FT0C_FT0M_bumpRegion; FT0C; FT0M; cent", {HistType::kTH3F, {{100, -o2::constants::math::PIHalf, o2::constants::math::PIHalf}, {100, -o2::constants::math::PIHalf, o2::constants::math::PIHalf}, {100, 0.0, 100.0}}});
 
       //< fit quality >//
       registry.add("h_PvalueCDF_CombinFit", "cDF #chi^{2}; entries", {HistType::kTH1F, {{50, 0, 1}}});
@@ -343,20 +342,68 @@ struct JetChargedV2 {
       registry.add("h_evtnum_centrlity", "eventNumber vs centrality ; #eventNumber", {HistType::kTH1F, {{1000, 0.0, 1000}}});
 
       registry.add("h2_phi_rholocal", "#varphi vs #rho(#varphi); #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
-      registry.add("h2_rholocal_cent", "#varphi vs #rho(#varphi); #cent;  #rho(#varphi) ", {HistType::kTH2F, {{100, 0., 100}, {210, -10.0, 200.0}}});
+      registry.add("h2_phi_rholocal_absDelta", "#varphi vs #rho(#varphi)absDelta, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+      registry.add("h2_centrality_pT", "centrality vs p_{T}; p_{T}; centrality ", {HistType::kTH2F, {{210, -10.0, 200.0}, {100, 0., 100}}});
+
+      registry.add("h2_rholocal_cent", "#centrality vs #rho(#varphi); #centrality;  #rho(#varphi) ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+      registry.add("h2_averagerho_cent", "#centrality vs #rho; #centrality;  #rho ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+
+      registry.add("h2_rholocal_pt", "#varphi vs #it{p}_{T}; #it{p}_{T};  #rho(#varphi) ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+      registry.add("h2_rholocal_raw_pt", "#varphi vs #it{p}_{T}; #it{p}_{T} - #rhoArea;  #rho(#varphi) ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+      registry.add("h2_rholocal_pt_inplane", "#varphi vs #it{p}_{T}; #it{p}_{T};  #rho(#varphi) ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+      registry.add("h2_rholocal_pt_outplane", "#varphi vs #it{p}_{T}; #it{p}_{T};  #rho(#varphi) ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+
+      registry.add("h2_phi_averagerho_absDelta", "#varphi vs #rho(0)absDelta, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+      registry.add("h2_averagerho_pt", "#varphi vs #it{p}_{T}; #it{p}_{T};  <#rho> ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+      registry.add("h2_averagerho_raw_pt", "#varphi vs #it{p}_{T}; #it{p}_{T} - <#rho>Area;  <#rho> ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+      registry.add("h2_averagerho_pt_inplane", "#varphi vs #it{p}_{T}; #it{p}_{T};  <#rho> ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+      registry.add("h2_averagerho_pt_outplane", "#varphi vs #it{p}_{T}; #it{p}_{T};  <#rho> ", {HistType::kTH2F, {{110, -10., 100}, {210, -10.0, 200.0}}});
+
+      registry.add("h2_phi_rholocal_absDelta_low", "#varphi vs #rho(#varphi)absDeltaLow, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+      registry.add("h2_phi_rholocal_absDelta_medium", "#varphi vs #rho(#varphi)absDeltaMediun, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+      registry.add("h2_phi_rholocal_absDelta_high", "#varphi vs #rho(#varphi)absDeltahigh, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+
+      registry.add("h2_phi_rholocal_absDelta_low_inplane", "#varphi vs #rho(#varphi)absDeltaLow inplane, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+      registry.add("h2_phi_rholocal_absDelta_medium_inplane", "#varphi vs #rho(#varphi)absDeltaMediun inplane, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+      registry.add("h2_phi_rholocal_absDelta_high_inplane", "#varphi vs #rho(#varphi)absDeltahigh inplane, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+
+      registry.add("h2_phi_rholocal_absDelta_low_outplane", "#varphi vs #rho(#varphi)absDeltaLow outplane, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+      registry.add("h2_phi_rholocal_absDelta_medium_outplane", "#varphi vs #rho(#varphi)absDeltaMediun outplane, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+      registry.add("h2_phi_rholocal_absDelta_high_outplane", "#varphi vs #rho(#varphi)absDeltahigh outplane, absDelta; #varphi - #Psi_{EP,2};  #rho(#varphi) ", {HistType::kTH2F, {{40, 0., o2::constants::math::TwoPI}, {210, -10.0, 200.0}}});
+
+      registry.add("h_good_bad_ugly", "local rho large than 0, less than 0 and total", {HistType::kTH1F, {{5, 0.0, 5.0}}});
+      registry.get<TH1>(HIST("h_good_bad_ugly"))->GetXaxis()->SetBinLabel(1, "#rho_{local} > 0");
+      registry.get<TH1>(HIST("h_good_bad_ugly"))->GetXaxis()->SetBinLabel(2, "#rho_{local} <= 0");
+      registry.get<TH1>(HIST("h_good_bad_ugly"))->GetXaxis()->SetBinLabel(3, "#rho_{local} total");
+      registry.add("h_jet_pt_badRhoLocal", "local rho info, Jet Pt", {HistType::kTH1F, {jetPtAxis}});
+      registry.add("h_jet_phi_badRhoLocal", "local rho info, Jet #phi ", {HistType::kTH1F, {phiAxis}});
+      registry.add("h_jet_eta_badRhoLocal", "local rho info, Jet #eta ", {HistType::kTH1F, {jetEtaAxis}});
       //< \sigma p_T at local rho test plot | end >
 
-      registry.add("h_jet_pt_rhoareasubtracted", "jet pT rhoareasubtracted;#it{p}_{T,jet} (GeV/#it{c}); entries", {HistType::kTH1F, {jetPtAxisRhoAreaSub}});
+      registry.add("h_jet_pt_inclusive_v2", "jet pT rhoareasubtracted;#it{p}_{T,jet} (GeV/#it{c}); entries", {HistType::kTH1F, {jetPtAxisRhoAreaSub}});
 
       registry.add("leadJetPt", "leadJet Pt ", {HistType::kTH1F, {{200, 0., 200.0}}});
       registry.add("leadJetPhi", "leadJet constituent #phi ", {HistType::kTH1F, {{80, -1.0, 7.}}});
       registry.add("leadJetEta", "leadJet constituent #eta ", {HistType::kTH1F, {{100, -1.0, 1.0}}});
 
       //< RC test plots >//
-      registry.add("h3_centrality_deltapT_RandomCornPhi_rhorandomconewithoutleadingjet", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}; #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
       registry.add("h3_centrality_deltapT_RandomCornPhi_localrhovsphi", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}; #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+      registry.add("h3_centrality_deltapT_RandomCornPhi_localrhovsphi_abs", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}; #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+      registry.add("h3_centrality_deltapT_RandomCornPhi_localrhovsphi_abs_in", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}; #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+      registry.add("h3_centrality_deltapT_RandomCornPhi_localrhovsphi_abs_out", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}; #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
 
+      registry.add("h3_centrality_deltapT_RandomCornPhi_rhorandomconewithoutleadingjet", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}; #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
       registry.add("h3_centrality_deltapT_RandomCornPhi_localrhovsphiwithoutleadingjet", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}(#varphi); #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+      registry.add("h3_centrality_deltapT_RandomCornPhi_rhorandomconewithoutleadingjet_abs", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}; #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+      registry.add("h3_centrality_deltapT_RandomCornPhi_localrhovsphiwithoutleadingjet_abs", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}(#varphi); #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+
+      registry.add("h3_centrality_deltapT_RandomCornPhi_rhorandomconewithoutleadingjet_abs_in", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}; #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+      registry.add("h3_centrality_deltapT_RandomCornPhi_rhorandomconewithoutleadingjet_abs_out", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}; #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+      registry.add("h3_centrality_deltapT_RandomCornPhi_localrhovsphiwithoutleadingjet_abs_in", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}(#varphi); #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+      registry.add("h3_centrality_deltapT_RandomCornPhi_localrhovsphiwithoutleadingjet_abs_out", "centrality; #it{p}_{T,random cone} - #it{area, random cone} * #it{rho}(#varphi); #Delta#varphi_{jet}", {HistType::kTH3F, {{100, 0.0, 100.0}, {400, -200.0, 200.0}, {100, 0., o2::constants::math::TwoPI}}});
+
+      // registry.add("h1_distribution_RC", "RC #phi-#Psi_{2}", {HistType::kTH1F, {{72, 0.0, o2::constants::math::TwoPI}}});
+
       //< bkg sub plot | end >//
       //< median rho >//
       registry.add("h_jet_pt_in_plane_v2", "jet pT;#it{p}^{in-plane}_{T,jet} (GeV/#it{c});entries", {HistType::kTH1F, {jetPtAxisRhoAreaSub}});
@@ -383,6 +430,7 @@ struct JetChargedV2 {
     }
 
     if (doprocessSigmaPtMCP || doprocessSigmaPtAreaSubMCP) {
+      registry.add("h_mccollisions_zvertex_mcp", "position of mc collision in mcp process ;#it{Z} (cm)", {HistType::kTH1F, {{300, -15.0, 15.0}}});
       registry.add("h_jet_pt_part", "partvjet pT;#it{p}_{T,jet}^{part} (GeV/#it{c}); counts", {HistType::kTH1F, {jetPtAxis}});
       registry.add("h_jet_eta_part", "part jet #eta;#eta^{part}; counts", {HistType::kTH1F, {jetEtaAxis}});
       registry.add("h_jet_phi_part", "part jet #varphi;#phi^{part}; counts", {HistType::kTH1F, {phiAxis}});
@@ -571,18 +619,20 @@ struct JetChargedV2 {
     if (fillHistograms) {
       registry.fill(HIST("h_collisions"), 0.5);
       registry.fill(HIST("h2_centrality_collisions"), centrality, 0.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_collisions_weighted"), 0.5, eventWeight);
+      }
     }
 
-    if (!jetderiveddatautilities::selectCollision(collision, eventSelectionBits, skipMBGapEvents)) {
+    if (!jetderiveddatautilities::selectCollision(collision, eventSelectionBits, skipMBGapEvents, applyRCTSelections)) {
       return false;
     }
     if (fillHistograms) {
       registry.fill(HIST("h_collisions"), 1.5);
       registry.fill(HIST("h2_centrality_collisions"), centrality, 1.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_collisions_weighted"), 1.5, eventWeight);
+      }
     }
 
     if (centrality < centralityMin || centralityMax < centrality) {
@@ -591,8 +641,9 @@ struct JetChargedV2 {
     if (fillHistograms) {
       registry.fill(HIST("h_collisions"), 2.5);
       registry.fill(HIST("h2_centrality_collisions"), centrality, 2.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_collisions_weighted"), 2.5, eventWeight);
+      }
     }
 
     if (collision.trackOccupancyInTimeRange() < trackOccupancyInTimeRangeMin || trackOccupancyInTimeRangeMax < collision.trackOccupancyInTimeRange()) {
@@ -601,8 +652,9 @@ struct JetChargedV2 {
     if (fillHistograms) {
       registry.fill(HIST("h_collisions"), 3.5);
       registry.fill(HIST("h2_centrality_collisions"), centrality, 3.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_collisions_weighted"), 3.5, eventWeight);
+      }
     }
 
     return true;
@@ -611,14 +663,22 @@ struct JetChargedV2 {
   template <typename TMCColl, typename TCollisions>
   bool applyMCCollisionCuts(TMCColl const& mccollision, TCollisions const& collisions, bool fillHistograms = false, bool isWeighted = false, float eventWeight = 1.0)
   {
+    if (isMCGenOnly) {
+      if (fillHistograms) {
+        registry.fill(HIST("h_mccollisions"), 0.5);
+      }
+      return true;
+    } // if isMCGenOnly is true, skip MC selection and accept all of them
+
     float centrality = -1.0;
     centrality = mccollision.centFT0M();
 
     if (fillHistograms) {
       registry.fill(HIST("h_mccollisions"), 0.5);
       registry.fill(HIST("h2_centrality_mccollisions"), centrality, 0.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_mccollisions_weighted"), 0.5, eventWeight);
+      }
     }
 
     if (collisions.size() < 1) {
@@ -627,8 +687,9 @@ struct JetChargedV2 {
     if (fillHistograms) {
       registry.fill(HIST("h_mccollisions"), 1.5);
       registry.fill(HIST("h2_centrality_mccollisions"), centrality, 1.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_mccollisions_weighted"), 1.5, eventWeight);
+      }
     }
 
     if (acceptSplitCollisions == NonSplitOnly && collisions.size() > 1) {
@@ -637,15 +698,16 @@ struct JetChargedV2 {
     if (fillHistograms) {
       registry.fill(HIST("h_mccollisions"), 2.5);
       registry.fill(HIST("h2_centrality_mccollisions"), centrality, 2.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_mccollisions_weighted"), 2.5, eventWeight);
+      }
     }
 
     bool hasSel8Coll = false;
     bool centralityIsGood = false;
     bool occupancyIsGood = false;
     if (acceptSplitCollisions == SplitOkCheckFirstAssocCollOnly) {
-      if (jetderiveddatautilities::selectCollision(collisions.begin(), eventSelectionBits, skipMBGapEvents)) {
+      if (jetderiveddatautilities::selectCollision(collisions.begin(), eventSelectionBits, skipMBGapEvents, applyRCTSelections)) {
         hasSel8Coll = true;
       }
       if ((trackOccupancyInTimeRangeMin < collisions.begin().trackOccupancyInTimeRange()) && (collisions.begin().trackOccupancyInTimeRange() < trackOccupancyInTimeRangeMax)) {
@@ -657,14 +719,13 @@ struct JetChargedV2 {
       }
     } else {
       for (auto const& collision : collisions) {
-        if (jetderiveddatautilities::selectCollision(collision, eventSelectionBits, skipMBGapEvents)) {
+        if (jetderiveddatautilities::selectCollision(collision, eventSelectionBits, skipMBGapEvents, applyRCTSelections)) {
           hasSel8Coll = true;
         }
         if ((trackOccupancyInTimeRangeMin < collision.trackOccupancyInTimeRange()) && (collision.trackOccupancyInTimeRange() < trackOccupancyInTimeRangeMax)) {
           occupancyIsGood = true;
         }
 
-        float centrality = -1.0;
         switch (centralityMode) {
           case 1:
             centrality = collision.centFT0M();
@@ -688,8 +749,9 @@ struct JetChargedV2 {
     if (fillHistograms) {
       registry.fill(HIST("h_mccollisions"), 3.5);
       registry.fill(HIST("h2_centrality_mccollisions"), centrality, 3.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_mccollisions_weighted"), 3.5, eventWeight);
+      }
     }
 
     if (!centralityIsGood) {
@@ -698,8 +760,9 @@ struct JetChargedV2 {
     if (fillHistograms) {
       registry.fill(HIST("h_mccollisions"), 4.5);
       registry.fill(HIST("h2_centrality_mccollisions"), centrality, 4.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_mccollisions_weighted"), 4.5, eventWeight);
+      }
     }
 
     if (!occupancyIsGood) {
@@ -708,8 +771,9 @@ struct JetChargedV2 {
     if (fillHistograms) {
       registry.fill(HIST("h_mccollisions"), 5.5);
       registry.fill(HIST("h2_centrality_mccollisions"), centrality, 5.5, eventWeight);
-      if (isWeighted)
+      if (isWeighted) {
         registry.fill(HIST("h_mccollisions_weighted"), 5.5, eventWeight);
+      }
     }
 
     return true;
@@ -743,13 +807,14 @@ struct JetChargedV2 {
 
   // leading jet fill
   template <typename T>
-  void fillLeadingJetQA(T const& jets, double& leadingJetPt, double& leadingJetPhi, double& leadingJetEta)
+  void fillLeadingJetQA(T const& jets, double& leadingJetPt, double& leadingJetPhi, double& leadingJetEta, double& leadingJetR)
   {
     for (const auto& jet : jets) {
       if (jet.pt() > leadingJetPt) {
         leadingJetPt = jet.pt();
         leadingJetEta = jet.eta();
         leadingJetPhi = jet.phi();
+        leadingJetR = jet.r() / 100.0;
       }
     }
     registry.fill(HIST("leadJetPt"), leadingJetPt);
@@ -759,36 +824,40 @@ struct JetChargedV2 {
 
   // create h_ptsum_sumpt_fit, with number of Track
   template <typename T, typename U>
-  void getNtrk(T const& tracks, U const& jets, int& nTrk, double& evtnum, double& leadingJetEta)
+  void getNtrk(T const& tracks, U const& jets, int& nTrk, double& evtnumNtrk, double& leadingJetEta)
   {
     if (jets.size() > 0) {
       for (auto const& track : tracks) {
-        if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > jetRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
+        double localRhoFitPtMin = 0.2;
+        double localRhoFitPtMax = 5;
+        if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > selectedJetsRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
           registry.fill(HIST("h_accept_Track"), 4.5);
           nTrk += 1;
         }
       }
-      registry.fill(HIST("h_evtnum_NTrk"), evtnum, nTrk);
+      registry.fill(HIST("h_evtnum_NTrk"), evtnumNtrk, nTrk);
     }
   }
 
   // fill nTrk plot for fit rho(varphi)
   template <typename U, typename J>
-  void fillNtrkCheck(U const& tracks, J const& jets, TH1F* hPtsumSumptFit, double& leadingJetEta)
+  void fillNtrkCheck(U const& tracks, J const& jets, TH1F* hPtsumSumptFitFill, double& leadingJetEta)
   {
     if (jets.size() > 0) {
+      double localRhoFitPtMin = 0.2;
+      double localRhoFitPtMax = 5;
       for (auto const& trackfit : tracks) {
         registry.fill(HIST("h_accept_Track"), 0.5);
-        if (jetderiveddatautilities::selectTrack(trackfit, trackSelection) && (std::fabs(trackfit.eta() - leadingJetEta) > jetRadius) && trackfit.pt() >= localRhoFitPtMin && trackfit.pt() <= localRhoFitPtMax) {
+        if (jetderiveddatautilities::selectTrack(trackfit, trackSelection) && (std::fabs(trackfit.eta() - leadingJetEta) > selectedJetsRadius) && trackfit.pt() >= localRhoFitPtMin && trackfit.pt() <= localRhoFitPtMax) {
           registry.fill(HIST("h_accept_Track"), 1.5);
         }
       }
 
       for (auto const& track : tracks) {
         registry.fill(HIST("h_accept_Track"), 2.5);
-        if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > jetRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
+        if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > selectedJetsRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
           registry.fill(HIST("h_accept_Track"), 3.5);
-          hPtsumSumptFit->Fill(track.phi(), track.pt());
+          hPtsumSumptFitFill->Fill(track.phi(), track.pt());
         }
       }
     }
@@ -812,7 +881,7 @@ struct JetChargedV2 {
 
   // Run General_Purpose MC MCP
   template <typename U, typename J>
-  void fitFncAreaSubMCP(U const& collision, J const& jets, TH1F* hPtsumSumptFitMCP, bool mcLevelIsParticleLevel, float weight = 1.0)
+  void fitFncAreaSubMCP(U const& collision, J const& jets, TH1F* hPtsumSumptFitMCPFill, bool mcLevelIsParticleLevel, float weight = 1.0)
   {
     float centrality = -1.0;
     switch (centralityMode) {
@@ -855,33 +924,29 @@ struct JetChargedV2 {
     fFitModulationV2v3P->SetParameter(1, 0.01);
     fFitModulationV2v3P->SetParameter(3, 0.01);
 
-    double ep2fix = 0.;
-    double ep3fix = 0.;
-
     if (ep2 < 0) {
-      ep2fix = RecoDecay::constrainAngle(ep2);
+      double ep2fix = RecoDecay::constrainAngle(ep2);
       fFitModulationV2v3P->FixParameter(2, ep2fix);
     } else {
       fFitModulationV2v3P->FixParameter(2, ep2);
     }
     if (ep3 < 0) {
-      ep3fix = RecoDecay::constrainAngle(ep3);
+      double ep3fix = RecoDecay::constrainAngle(ep3);
       fFitModulationV2v3P->FixParameter(4, ep3fix);
     } else {
       fFitModulationV2v3P->FixParameter(4, ep3);
     }
 
-    hPtsumSumptFitMCP->Fit(fFitModulationV2v3P, "Q", "ep", 0, o2::constants::math::TwoPI);
+    hPtsumSumptFitMCPFill->Fit(fFitModulationV2v3P, "Q", "ep", 0, o2::constants::math::TwoPI);
 
-    double temppara[5];
+    // double temppara[5];
+    std::array<double, 5> temppara{};
     temppara[0] = fFitModulationV2v3P->GetParameter(0);
     temppara[1] = fFitModulationV2v3P->GetParameter(1);
     temppara[2] = fFitModulationV2v3P->GetParameter(2);
     temppara[3] = fFitModulationV2v3P->GetParameter(3);
     temppara[4] = fFitModulationV2v3P->GetParameter(4);
-    if (temppara[0] == 0) {
-      return;
-    }
+
     registry.fill(HIST("h_mcp_fitparaRho_evtnum"), evtnum, temppara[0]);
     registry.fill(HIST("h_mcp_fitparaPsi2_evtnum"), evtnum, temppara[2]);
     registry.fill(HIST("h_mcp_fitparaPsi3_evtnum"), evtnum, temppara[4]);
@@ -904,19 +969,21 @@ struct JetChargedV2 {
           continue;
         }
 
-        double integralValue = fFitModulationV2v3P->Integral(jet.phi() - jetRadius, jet.phi() + jetRadius);
-        double rholocal = collision.rho() / (2 * jetRadius * temppara[0]) * integralValue;
+        double integralValue = fFitModulationV2v3P->Integral(jet.phi() - selectedJetsRadius, jet.phi() + selectedJetsRadius);
+        double rholocal = collision.rho() / (2 * selectedJetsRadius * temppara[0]) * integralValue;
         registry.fill(HIST("h2_mcp_phi_rholocal"), jet.phi() - ep2, rholocal, weight);
         registry.fill(HIST("h2_mcp_centrality_rholocal"), centrality, rholocal, weight);
         if (nmode == cfgNmodA) {
           registry.fill(HIST("h_mcp_jet_pt_rholocal"), jet.pt() - (rholocal * jet.area()), weight);
 
-          double phiMinusPsi2;
+          double phiMinusPsi2 = 0.0;
           if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
             continue;
           }
-          phiMinusPsi2 = jet.phi() - ep2;
-          if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+          // phiMinusPsi2 = jet.phi() - ep2;
+          phiMinusPsi2 = RecoDecay::constrainAngle(jet.phi() - ep2, -o2::constants::math::PI);
+          float absDelta = std::abs(phiMinusPsi2);
+          if ((absDelta < o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta < evtPlnAngleC * o2::constants::math::PIQuarter)) {
             registry.fill(HIST("h_mcp_jet_pt_in_plane_v2_rho"), jet.pt() - (rholocal * jet.area()), weight);
             registry.fill(HIST("h2_mcp_centrality_jet_pt_in_plane_v2_rho"), centrality, jet.pt() - (rholocal * jet.area()), weight);
           } else {
@@ -924,97 +991,21 @@ struct JetChargedV2 {
             registry.fill(HIST("h2_mcp_centrality_jet_pt_out_of_plane_v2_rho"), centrality, jet.pt() - (rholocal * jet.area()), weight);
           }
         } else if (nmode == cfgNmodB) {
-          double phiMinusPsi3;
+          double phiMinusPsi3 = 0.0;
+
           if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
             continue;
           }
           ep3 = helperEP.GetEventPlane(collision.qvecRe()[detInd], collision.qvecIm()[detInd], nmode);
-          phiMinusPsi3 = jet.phi() - ep3;
-
-          if ((phiMinusPsi3 < o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi3 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+          // phiMinusPsi3 = jet.phi() - ep3;
+          phiMinusPsi3 = RecoDecay::constrainAngle(jet.phi() - ep3, -o2::constants::math::PI);
+          float absDelta3 = std::abs(phiMinusPsi3);
+          if ((absDelta3 < o2::constants::math::PIQuarter) || (absDelta3 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta3 >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta3 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
             registry.fill(HIST("h_mcp_jet_pt_in_plane_v3_rho"), jet.pt() - (rholocal * jet.area()), weight);
             registry.fill(HIST("h2_mcp_centrality_jet_pt_in_plane_v3_rho"), centrality, jet.pt() - (rholocal * jet.area()), weight);
           } else {
             registry.fill(HIST("h_mcp_jet_pt_out_of_plane_v3_rho"), jet.pt() - (rholocal * jet.area()), weight);
             registry.fill(HIST("h2_mcp_centrality_jet_pt_out_of_plane_v3_rho"), centrality, jet.pt() - (rholocal * jet.area()), weight);
-          }
-        }
-      }
-    }
-  }
-
-  // Run jet-jet MC MCP leading jet fill
-  template <typename U, typename J>
-  void fitFncMCP(U const& collision, J const& jets, bool mcLevelIsParticleLevel, float weight = 1.0)
-  {
-    double ep2 = 0.;
-    double ep3 = 0.;
-    int cfgNmodA = 2;
-    int cfgNmodB = 3;
-    int evtPlnAngleA = 7;
-    int evtPlnAngleB = 3;
-    int evtPlnAngleC = 5;
-    for (uint i = 0; i < cfgnMods->size(); i++) {
-      int nmode = cfgnMods->at(i);
-      int detInd = detId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
-      if (nmode == cfgNmodA) {
-        if (collision.qvecAmp()[detId] > collQvecAmpDetId) {
-          ep2 = helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode);
-        }
-      } else if (nmode == cfgNmodB) {
-        if (collision.qvecAmp()[detId] > collQvecAmpDetId) {
-          ep3 = helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode);
-        }
-      }
-    }
-    registry.fill(HIST("h_mcp_evtnum_centrlity"), evtnum, collision.centFT0M());
-    registry.fill(HIST("h_ep2_evtnum"), evtnum, ep2);
-    registry.fill(HIST("h_ep3_evtnum"), evtnum, ep3);
-
-    for (uint i = 0; i < cfgnMods->size(); i++) {
-      int nmode = cfgnMods->at(i);
-      int detInd = detId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
-
-      for (auto const& jet : jets) {
-        if (!jetfindingutilities::isInEtaAcceptance(jet, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
-          continue;
-        }
-        if (!isAcceptedJet<aod::JetParticles>(jet, mcLevelIsParticleLevel)) {
-          continue;
-        }
-        if (jet.r() != round(selectedJetsRadius * 100.0f)) {
-          continue;
-        }
-
-        if (nmode == cfgNmodA) {
-          registry.fill(HIST("h_mcp_jet_pt_rhoareasubtracted"), jet.pt(), weight);
-
-          double phiMinusPsi2;
-          if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
-            continue;
-          }
-          phiMinusPsi2 = jet.phi() - ep2;
-          if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
-            registry.fill(HIST("h_mcp_jet_pt_in_plane_v2_rho"), jet.pt(), weight);
-            registry.fill(HIST("h2_mcp_centrality_jet_pt_in_plane_v2_rho"), collision.centFT0M(), jet.pt(), weight);
-          } else {
-            registry.fill(HIST("h_mcp_jet_pt_out_of_plane_v2_rho"), jet.pt(), weight);
-            registry.fill(HIST("h2_mcp_centrality_jet_pt_out_of_plane_v2_rho"), collision.centFT0M(), jet.pt(), weight);
-          }
-        } else if (nmode == cfgNmodB) {
-          double phiMinusPsi3;
-          if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
-            continue;
-          }
-          ep3 = helperEP.GetEventPlane(collision.qvecRe()[detInd], collision.qvecIm()[detInd], nmode);
-          phiMinusPsi3 = jet.phi() - ep3;
-
-          if ((phiMinusPsi3 < o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi3 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
-            registry.fill(HIST("h_mcp_jet_pt_in_plane_v3_rho"), jet.pt(), weight);
-            registry.fill(HIST("h2_mcp_centrality_jet_pt_in_plane_v3_rho"), collision.centFT0M(), jet.pt(), weight);
-          } else {
-            registry.fill(HIST("h_mcp_jet_pt_out_of_plane_v3_rho"), jet.pt(), weight);
-            registry.fill(HIST("h2_mcp_centrality_jet_pt_out_of_plane_v3_rho"), collision.centFT0M(), jet.pt(), weight);
           }
         }
       }
@@ -1059,13 +1050,6 @@ struct JetChargedV2 {
     }
   }
 
-  template <typename TTracks>
-  void fillTrackHistograms(TTracks const& track, float weight = 1.0)
-  {
-    registry.fill(HIST("h_track_pt"), track.pt(), weight);
-    registry.fill(HIST("h2_track_eta_track_phi"), track.eta(), track.phi(), weight);
-  }
-
   template <typename TBase, typename TTag>
   void fillGeoMatchedHistograms(TBase const& jetMCD, double ep2, float rho, float mcrho = 0.0, float weight = 1.0)
   {
@@ -1082,14 +1066,17 @@ struct JetChargedV2 {
           int evtPlnAngleA = 7;
           int evtPlnAngleB = 3;
           int evtPlnAngleC = 5;
-          double phiMinusPsi2 = jetMCD.phi() - ep2;
+          double phiMinusPsi2 = 0.0;
+          // double phiMinusPsi2 = jetMCD.phi() - ep2;
+          phiMinusPsi2 = RecoDecay::constrainAngle(jetMCD.phi() - ep2, -o2::constants::math::PI);
+          float absDelta = std::abs(phiMinusPsi2);
           double corrTagjetpt = jetMCP.pt() - (mcrho * jetMCP.area());
           double corrBasejetpt = jetMCD.pt() - (rho * jetMCD.area());
           double dcorrpt = corrTagjetpt - corrBasejetpt;
           if (jetfindingutilities::isInEtaAcceptance(jetMCD, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
             registry.fill(HIST("h2_jet_pt_mcd_jet_pt_mcp_matchedgeo_mcdetaconstraint"), corrBasejetpt, corrTagjetpt, weight);
             registry.fill(HIST("h2_jet_pt_mcd_jet_pt_diff_matchedgeo"), corrBasejetpt, dcorrpt / corrBasejetpt, weight);
-            if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+            if ((absDelta < o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta < evtPlnAngleC * o2::constants::math::PIQuarter)) {
               registry.fill(HIST("h2_jet_pt_mcd_jet_pt_mcp_matchedgeo_in_mcdetaconstraint"), corrBasejetpt, corrTagjetpt, weight);
               registry.fill(HIST("h2_jet_pt_mcd_jet_pt_diff_matchedgeo_in"), corrBasejetpt, dcorrpt / corrBasejetpt, weight);
             } else {
@@ -1101,7 +1088,7 @@ struct JetChargedV2 {
             registry.fill(HIST("h2_jet_pt_mcd_jet_pt_mcp_matchedgeo_mcpetaconstraint"), corrBasejetpt, corrTagjetpt, weight);
             registry.fill(HIST("h2_jet_pt_mcp_jet_pt_diff_matchedgeo"), corrTagjetpt, dcorrpt / corrTagjetpt, weight);
             registry.fill(HIST("h2_jet_pt_mcp_jet_pt_ratio_matchedgeo"), corrTagjetpt, corrBasejetpt / corrTagjetpt, weight);
-            if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+            if ((absDelta < o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta < evtPlnAngleC * o2::constants::math::PIQuarter)) {
               registry.fill(HIST("h2_jet_pt_mcd_jet_pt_mcp_matchedgeo_in_mcpetaconstraint"), corrBasejetpt, corrTagjetpt, weight);
               registry.fill(HIST("h2_jet_pt_mcp_jet_pt_diff_matchedgeo_in"), corrTagjetpt, dcorrpt / corrTagjetpt, weight);
               registry.fill(HIST("h2_jet_pt_mcp_jet_pt_ratio_matchedgeo_in"), corrTagjetpt, corrBasejetpt / corrTagjetpt, weight);
@@ -1117,7 +1104,7 @@ struct JetChargedV2 {
   }
 
   template <typename TBase, typename TTag>
-  void fillGeoMatchedCorrHistograms(TBase const& jetMCD, TF1* fFitModulationRM, float tempparaA, double ep2, float rho, bool subtractMCPBackground, float mcrho, float weight = 1.0)
+  void fillGeoMatchedCorrHistograms(TBase const& jetMCD, TF1* fFitModulationRMFill, float tempparaA, double ep2, float rho, bool subtractMCPBackgroundBool, float mcrho, float weight = 1.0)
   {
     float pTHat = 10. / (std::pow(weight, 1.0 / pTHatExponent));
     if (jetMCD.pt() > pTHatMaxMCD * pTHat) {
@@ -1144,23 +1131,26 @@ struct JetChargedV2 {
           int evtPlnAngleA = 7;
           int evtPlnAngleB = 3;
           int evtPlnAngleC = 5;
-          double integralValue = fFitModulationRM->Integral(jetMCD.phi() - jetRadius, jetMCD.phi() + jetRadius);
-          double rholocal = rho / (2 * jetRadius * tempparaA) * integralValue;
+          double integralValue = fFitModulationRMFill->Integral(jetMCD.phi() - selectedJetsRadius, jetMCD.phi() + selectedJetsRadius);
+          double rholocal = rho / (2 * selectedJetsRadius * tempparaA) * integralValue;
           double corrBasejetpt = jetMCD.pt() - (rholocal * jetMCD.area());
-          double corrTagjetpt;
-          if (subtractMCPBackground) {
-            double integralValueMCP = fFitModulationRM->Integral(jetMCP.phi() - jetRadius, jetMCP.phi() + jetRadius);
-            double rholocalMCP = mcrho / (2 * jetRadius * tempparaA) * integralValueMCP;
+          double corrTagjetpt = 0.0;
+          if (subtractMCPBackgroundBool) {
+            double integralValueMCP = fFitModulationRMFill->Integral(jetMCP.phi() - selectedJetsRadius, jetMCP.phi() + selectedJetsRadius);
+            double rholocalMCP = mcrho / (2 * selectedJetsRadius * tempparaA) * integralValueMCP;
             corrTagjetpt = jetMCP.pt() - (rholocalMCP * jetMCP.area());
           } else {
             corrTagjetpt = jetMCP.pt() - (mcrho * jetMCP.area());
           }
           double dcorrpt = corrTagjetpt - corrBasejetpt;
-          double phiMinusPsi2 = jetMCD.phi() - ep2;
+          double phiMinusPsi2 = 0.0;
+          // double phiMinusPsi2 = jetMCD.phi() - ep2;
+          phiMinusPsi2 = RecoDecay::constrainAngle(jetMCD.phi() - ep2, -o2::constants::math::PI);
+          float absDelta = std::abs(phiMinusPsi2);
           if (jetfindingutilities::isInEtaAcceptance(jetMCD, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
             registry.fill(HIST("h2_jet_pt_mcd_jet_pt_mcp_matchedgeo_incl_rhoareasubtracted_mcdetaconstraint"), corrBasejetpt, corrTagjetpt, weight);
             registry.fill(HIST("h2_jet_pt_mcd_jet_pt_diff_matchedgeo_incl_rhoareasubtracted"), corrBasejetpt, dcorrpt / corrBasejetpt, weight);
-            if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+            if ((absDelta < o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta < evtPlnAngleC * o2::constants::math::PIQuarter)) {
               registry.fill(HIST("h2_jet_pt_mcd_jet_pt_mcp_matchedgeo_in_rhoareasubtracted_mcdetaconstraint"), corrBasejetpt, corrTagjetpt, weight);
               registry.fill(HIST("h2_jet_pt_mcd_jet_pt_diff_matchedgeo_in_rhoareasubtracted"), corrBasejetpt, dcorrpt / corrBasejetpt, weight);
             } else {
@@ -1172,7 +1162,7 @@ struct JetChargedV2 {
             registry.fill(HIST("h2_jet_pt_mcd_jet_pt_mcp_matchedgeo_incl_rhoareasubtracted_mcpetaconstraint"), corrBasejetpt, corrTagjetpt, weight);
             registry.fill(HIST("h2_jet_pt_mcp_jet_pt_diff_matchedgeo_incl_rhoareasubtracted"), corrTagjetpt, dcorrpt / corrTagjetpt, weight);
             registry.fill(HIST("h2_jet_pt_mcp_jet_pt_ratio_matchedgeo_incl_rhoareasubtracted"), corrTagjetpt, corrBasejetpt / corrTagjetpt, weight);
-            if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+            if ((absDelta < o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta < evtPlnAngleC * o2::constants::math::PIQuarter)) {
               registry.fill(HIST("h2_jet_pt_mcd_jet_pt_mcp_matchedgeo_in_rhoareasubtracted_mcpetaconstraint"), corrBasejetpt, corrTagjetpt, weight);
               registry.fill(HIST("h2_jet_pt_mcp_jet_pt_diff_matchedgeo_in_rhoareasubtracted"), corrTagjetpt, dcorrpt / corrTagjetpt, weight);
               registry.fill(HIST("h2_jet_pt_mcp_jet_pt_ratio_matchedgeo_in_rhoareasubtracted"), corrTagjetpt, corrBasejetpt / corrTagjetpt, weight);
@@ -1295,13 +1285,6 @@ struct JetChargedV2 {
         continue;
       }
     }
-
-    if (collision.trackOccupancyInTimeRange() < trackOccupancyInTimeRangeMin || trackOccupancyInTimeRangeMax < collision.trackOccupancyInTimeRange()) {
-      return;
-    }
-    if (!jetderiveddatautilities::selectCollision(collision, eventSelectionBits)) {
-      return;
-    }
     //=====================< evt pln [n=2->\Psi_2, n=3->\Psi_3] >=====================//
     histosQA.fill(HIST("histCent"), collision.cent());
 
@@ -1311,11 +1294,12 @@ struct JetChargedV2 {
     for (uint i = 0; i < cfgnMods->size(); i++) {
       int nmode = cfgnMods->at(i);
       int detInd = detId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
+      int detIndFT0M = (detIdCheck + 2) * 4 + cfgnTotalSystem * 4 * (nmode - 2);
       int refAInd = refAId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
       int refBInd = refBId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
 
       if (nmode == cfgNmodA) {
-        if (collision.qvecAmp()[detId] > collQvecAmpDetId || collision.qvecAmp()[refAId] < collQvecAmpDetId || collision.qvecAmp()[refBId] < collQvecAmpDetId) {
+        if (collision.qvecAmp()[detId] > collQvecAmpDetId && collision.qvecAmp()[refAId] > collQvecAmpDetId && collision.qvecAmp()[refBId] > collQvecAmpDetId) {
           histosQA.fill(HIST("histQvecUncorV2"), collision.qvecRe()[detInd], collision.qvecIm()[detInd], collision.cent());
           histosQA.fill(HIST("histQvecRectrV2"), collision.qvecRe()[detInd + 1], collision.qvecIm()[detInd + 1], collision.cent());
           histosQA.fill(HIST("histQvecTwistV2"), collision.qvecRe()[detInd + 2], collision.qvecIm()[detInd + 2], collision.cent());
@@ -1325,6 +1309,11 @@ struct JetChargedV2 {
           histosQA.fill(HIST("histEvtPlRectrV2"), helperEP.GetEventPlane(collision.qvecRe()[detInd + 1], collision.qvecIm()[detInd + 1], nmode), collision.cent());
           histosQA.fill(HIST("histEvtPlTwistV2"), helperEP.GetEventPlane(collision.qvecRe()[detInd + 2], collision.qvecIm()[detInd + 2], nmode), collision.cent());
           histosQA.fill(HIST("histEvtPlFinalV2"), helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), collision.cent());
+
+          // mark
+          histosQA.fill(HIST("h_ep2_FT0CV2"), helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), collision.cent());
+          histosQA.fill(HIST("h_ep2_FT0MV2"), helperEP.GetEventPlane(collision.qvecRe()[detIndFT0M + 3], collision.qvecIm()[detIndFT0M + 3], nmode), collision.cent());
+          histosQA.fill(HIST("h2_ep2_FT0C_FT0M"), helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[detIndFT0M + 3], collision.qvecIm()[detIndFT0M + 3], nmode), collision.cent());
 
           histosQA.fill(HIST("histEvtPlRes_SigRefAV2"), helperEP.GetResolution(helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[refAInd + 3], collision.qvecIm()[refAInd + 3], nmode), nmode), collision.cent());
           histosQA.fill(HIST("histEvtPlRes_SigRefBV2"), helperEP.GetResolution(helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[refBInd + 3], collision.qvecIm()[refBInd + 3], nmode), nmode), collision.cent());
@@ -1344,76 +1333,6 @@ struct JetChargedV2 {
         histosQA.fill(HIST("histEvtPlRes_SigRefAV3"), helperEP.GetResolution(helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[refAInd + 3], collision.qvecIm()[refAInd + 3], nmode), nmode), collision.cent());
         histosQA.fill(HIST("histEvtPlRes_SigRefBV3"), helperEP.GetResolution(helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[refBInd + 3], collision.qvecIm()[refBInd + 3], nmode), nmode), collision.cent());
         histosQA.fill(HIST("histEvtPlRes_RefARefBV3"), helperEP.GetResolution(helperEP.GetEventPlane(collision.qvecRe()[refAInd + 3], collision.qvecIm()[refAInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[refBInd + 3], collision.qvecIm()[refBInd + 3], nmode), nmode), collision.cent());
-      }
-    }
-
-    float centrality = -1.0;
-    switch (centralityMode) {
-      case 1:
-        centrality = collision.centFT0M();
-        break;
-      case 2:
-        centrality = collision.centFT0A();
-        break;
-      default:
-        centrality = collision.centFT0C();
-        break;
-    }
-    int evtPlnAngleA = 7;
-    int evtPlnAngleB = 3;
-    int evtPlnAngleC = 5;
-    for (uint i = 0; i < cfgnMods->size(); i++) {
-      int nmode = cfgnMods->at(i);
-      int detInd = detId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
-
-      if (nmode == cfgNmodA) {
-        double phiMinusPsi2;
-        if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
-          continue;
-        }
-        float ep2 = helperEP.GetEventPlane(collision.qvecRe()[detInd], collision.qvecIm()[detInd], nmode);
-        for (auto const& jet : jets) {
-          if (!jetfindingutilities::isInEtaAcceptance(jet, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
-            continue;
-          }
-          if (!isAcceptedJet<aod::JetTracks>(jet)) {
-            continue;
-          }
-          if (jet.r() != round(selectedJetsRadius * 100.0f)) {
-            continue;
-          }
-          registry.fill(HIST("h_jet_pt_rhoareasubtracted"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-
-          phiMinusPsi2 = jet.phi() - ep2;
-          if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
-            registry.fill(HIST("h_jet_pt_in_plane_v2"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-            registry.fill(HIST("h2_centrality_jet_pt_in_plane_v2"), centrality, jet.pt() - (collision.rho() * jet.area()), 1.0);
-          } else {
-            registry.fill(HIST("h_jet_pt_out_of_plane_v2"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-            registry.fill(HIST("h2_centrality_jet_pt_out_of_plane_v2"), centrality, jet.pt() - (collision.rho() * jet.area()), 1.0);
-          }
-        }
-      } else if (nmode == cfgNmodB) {
-        double phiMinusPsi3;
-        float ep3 = helperEP.GetEventPlane(collision.qvecRe()[detInd], collision.qvecIm()[detInd], nmode);
-        for (auto const& jet : jets) {
-          if (!jetfindingutilities::isInEtaAcceptance(jet, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
-            continue;
-          }
-          if (!isAcceptedJet<aod::JetTracks>(jet)) {
-            continue;
-          }
-          if (jet.r() != round(selectedJetsRadius * 100.0f)) {
-            continue;
-          }
-          phiMinusPsi3 = jet.phi() - ep3;
-
-          if ((phiMinusPsi3 < o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi3 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
-            registry.fill(HIST("h_jet_pt_in_plane_v3"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-          } else {
-            registry.fill(HIST("h_jet_pt_out_of_plane_v3"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-          }
-        }
       }
     }
   }
@@ -1446,7 +1365,7 @@ struct JetChargedV2 {
       int refBInd = refBId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
 
       if (nmode == cfgNmodA) {
-        if (collision.qvecAmp()[detId] > collQvecAmpDetId || collision.qvecAmp()[refAId] < collQvecAmpDetId || collision.qvecAmp()[refBId] < collQvecAmpDetId) {
+        if (collision.qvecAmp()[detId] > collQvecAmpDetId && collision.qvecAmp()[refAId] > collQvecAmpDetId && collision.qvecAmp()[refBId] > collQvecAmpDetId) {
           histosQA.fill(HIST("histQvecUncorV2"), collision.qvecRe()[detInd], collision.qvecIm()[detInd], collision.cent());
           histosQA.fill(HIST("histQvecRectrV2"), collision.qvecRe()[detInd + 1], collision.qvecIm()[detInd + 1], collision.cent());
           histosQA.fill(HIST("histQvecTwistV2"), collision.qvecRe()[detInd + 2], collision.qvecIm()[detInd + 2], collision.cent());
@@ -1475,76 +1394,6 @@ struct JetChargedV2 {
         histosQA.fill(HIST("histEvtPlRes_SigRefAV3"), helperEP.GetResolution(helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[refAInd + 3], collision.qvecIm()[refAInd + 3], nmode), nmode), collision.cent());
         histosQA.fill(HIST("histEvtPlRes_SigRefBV3"), helperEP.GetResolution(helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[refBInd + 3], collision.qvecIm()[refBInd + 3], nmode), nmode), collision.cent());
         histosQA.fill(HIST("histEvtPlRes_RefARefBV3"), helperEP.GetResolution(helperEP.GetEventPlane(collision.qvecRe()[refAInd + 3], collision.qvecIm()[refAInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[refBInd + 3], collision.qvecIm()[refBInd + 3], nmode), nmode), collision.cent());
-      }
-    }
-
-    float centrality = -1.0;
-    switch (centralityMode) {
-      case 1:
-        centrality = collision.centFT0M();
-        break;
-      case 2:
-        centrality = collision.centFT0A();
-        break;
-      default:
-        centrality = collision.centFT0C();
-        break;
-    }
-    int evtPlnAngleA = 7;
-    int evtPlnAngleB = 3;
-    int evtPlnAngleC = 5;
-    for (uint i = 0; i < cfgnMods->size(); i++) {
-      int nmode = cfgnMods->at(i);
-      int detInd = detId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
-
-      if (nmode == cfgNmodA) {
-        double phiMinusPsi2;
-        if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
-          continue;
-        }
-        float ep2 = helperEP.GetEventPlane(collision.qvecRe()[detInd], collision.qvecIm()[detInd], nmode);
-        for (auto const& jet : jets) {
-          if (!jetfindingutilities::isInEtaAcceptance(jet, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
-            continue;
-          }
-          if (!isAcceptedJet<aod::JetTracks>(jet)) {
-            continue;
-          }
-          if (jet.r() != round(selectedJetsRadius * 100.0f)) {
-            continue;
-          }
-          registry.fill(HIST("h_jet_pt_rhoareasubtracted"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-
-          phiMinusPsi2 = jet.phi() - ep2;
-          if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
-            registry.fill(HIST("h_jet_pt_in_plane_v2"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-            registry.fill(HIST("h2_centrality_jet_pt_in_plane_v2"), centrality, jet.pt() - (collision.rho() * jet.area()), 1.0);
-          } else {
-            registry.fill(HIST("h_jet_pt_out_of_plane_v2"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-            registry.fill(HIST("h2_centrality_jet_pt_out_of_plane_v2"), centrality, jet.pt() - (collision.rho() * jet.area()), 1.0);
-          }
-        }
-      } else if (nmode == cfgNmodB) {
-        double phiMinusPsi3;
-        float ep3 = helperEP.GetEventPlane(collision.qvecRe()[detInd], collision.qvecIm()[detInd], nmode);
-        for (auto const& jet : jets) {
-          if (!jetfindingutilities::isInEtaAcceptance(jet, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
-            continue;
-          }
-          if (!isAcceptedJet<aod::JetTracks>(jet)) {
-            continue;
-          }
-          if (jet.r() != round(selectedJetsRadius * 100.0f)) {
-            continue;
-          }
-          phiMinusPsi3 = jet.phi() - ep3;
-
-          if ((phiMinusPsi3 < o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi3 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
-            registry.fill(HIST("h_jet_pt_in_plane_v3"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-          } else {
-            registry.fill(HIST("h_jet_pt_out_of_plane_v3"), jet.pt() - (collision.rho() * jet.area()), 1.0);
-          }
-        }
       }
     }
   }
@@ -1582,7 +1431,8 @@ struct JetChargedV2 {
     double leadingJetPt = -1;
     double leadingJetPhi = -1;
     double leadingJetEta = -1;
-    fillLeadingJetQA(jets, leadingJetPt, leadingJetPhi, leadingJetEta);
+    double leadingJetR = -1;
+    fillLeadingJetQA(jets, leadingJetPt, leadingJetPhi, leadingJetEta, leadingJetR);
 
     int nTrk = 0;
     getNtrk(tracks, jets, nTrk, evtnum, leadingJetEta);
@@ -1597,12 +1447,13 @@ struct JetChargedV2 {
     double ep3 = 0.;
     int cfgNmodA = 2;
     int cfgNmodB = 3;
-    int evtPlnAngleA = 7;
-    int evtPlnAngleB = 3;
-    int evtPlnAngleC = 5;
+    int evtPlnAngleA = 3;
+    // int evtPlnAngleB = 3;
+    // int evtPlnAngleC = 5;
     for (uint i = 0; i < cfgnMods->size(); i++) {
       int nmode = cfgnMods->at(i);
       int detInd = detId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
+
       if (nmode == cfgNmodA) {
         if (collision.qvecAmp()[detId] > collQvecAmpDetId) {
           ep2 = helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode);
@@ -1615,23 +1466,20 @@ struct JetChargedV2 {
     }
 
     const char* fitFunctionV2v3 = "[0] * (1. + 2. * ([1] * std::cos(2. * (x - [2])) + [3] * std::cos(3. * (x - [4]))))";
-    fFitModulationV2v3 = new TF1("fit_kV3", fitFunctionV2v3, 0, o2::constants::math::TwoPI);
+    fFitModulationV2v3 = new TF1("fit_kV3", fitFunctionV2v3, -1, o2::constants::math::TwoPI + 1);
     //=========================< set parameter >=========================//
     fFitModulationV2v3->SetParameter(0, 1.);
     fFitModulationV2v3->SetParameter(1, 0.01);
     fFitModulationV2v3->SetParameter(3, 0.01);
 
-    double ep2fix = 0.;
-    double ep3fix = 0.;
-
     if (ep2 < 0) {
-      ep2fix = RecoDecay::constrainAngle(ep2);
+      double ep2fix = RecoDecay::constrainAngle(ep2);
       fFitModulationV2v3->FixParameter(2, ep2fix);
     } else {
       fFitModulationV2v3->FixParameter(2, ep2);
     }
     if (ep3 < 0) {
-      ep3fix = RecoDecay::constrainAngle(ep3);
+      double ep3fix = RecoDecay::constrainAngle(ep3);
       fFitModulationV2v3->FixParameter(4, ep3fix);
     } else {
       fFitModulationV2v3->FixParameter(4, ep3);
@@ -1639,7 +1487,8 @@ struct JetChargedV2 {
 
     hPtsumSumptFit->Fit(fFitModulationV2v3, "Q", "ep", 0, o2::constants::math::TwoPI);
 
-    double temppara[5];
+    // double temppara[5];
+    std::array<double, 5> temppara{};
     temppara[0] = fFitModulationV2v3->GetParameter(0);
     temppara[1] = fFitModulationV2v3->GetParameter(1);
     temppara[2] = fFitModulationV2v3->GetParameter(2);
@@ -1653,19 +1502,17 @@ struct JetChargedV2 {
     registry.fill(HIST("h_v3obs_centrality"), centrality, temppara[3]);
     registry.fill(HIST("h_evtnum_centrlity"), evtnum, centrality);
 
-    if (temppara[0] == 0) {
-      return;
-    }
-
     int nDF = 1;
     int numOfFreePara = 2;
     nDF = static_cast<int>(fFitModulationV2v3->GetXaxis()->GetNbins()) - numOfFreePara;
-    if (nDF == 0 || static_cast<float>(nDF) <= 0.)
+    if (nDF == 0 || static_cast<float>(nDF) <= 0.) {
       return;
+    }
     double chi2 = 0.;
     for (int i = 0; i < hPtsumSumptFit->GetXaxis()->GetNbins(); i++) {
-      if (hPtsumSumptFit->GetBinContent(i + 1) <= 0.)
+      if (hPtsumSumptFit->GetBinContent(i + 1) <= 0.) {
         continue;
+      }
       chi2 += std::pow((hPtsumSumptFit->GetBinContent(i + 1) - fFitModulationV2v3->Eval(hPtsumSumptFit->GetXaxis()->GetBinCenter(1 + i))), 2) / hPtsumSumptFit->GetBinContent(i + 1);
     }
 
@@ -1702,6 +1549,30 @@ struct JetChargedV2 {
     for (uint i = 0; i < cfgnMods->size(); i++) {
       int nmode = cfgnMods->at(i);
       int detInd = detId * 4 + cfgnTotalSystem * 4 * (nmode - 2);
+      int detIndFT0M = 4 * detCheck + cfgnTotalSystem * 4 * (nmode - 2);
+      int bumpLow = 75;
+      int bumpUp = 125;
+
+      bool hasBumpJet = false;
+      for (auto const& jet : jets) {
+        if (!jetfindingutilities::isInEtaAcceptance(jet, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
+          continue;
+        }
+        if (!isAcceptedJet<aod::JetTracks>(jet)) {
+          continue;
+        }
+        if (jet.r() != round(selectedJetsRadius * 100.0f)) {
+          continue;
+        }
+        if (jet.pt() > bumpLow && jet.pt() < bumpUp) {
+          hasBumpJet = true;
+        }
+      }
+      if (hasBumpJet && nmode == cfgNmodA) {
+        if (collision.qvecAmp()[detId] >= collQvecAmpDetId) {
+          histosQA.fill(HIST("h2_ep2_FT0C_FT0M_bumpRegion"), helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[detIndFT0M + 3], collision.qvecIm()[detIndFT0M + 3], nmode), collision.cent());
+        }
+      }
 
       for (auto const& jet : jets) {
         if (!jetfindingutilities::isInEtaAcceptance(jet, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
@@ -1713,39 +1584,124 @@ struct JetChargedV2 {
         if (jet.r() != round(selectedJetsRadius * 100.0f)) {
           continue;
         }
+        double twoPi = o2::constants::math::TwoPI;
+        double phi = std::fmod(jet.phi(), twoPi);
+        if (phi < 0) {
+          phi += twoPi;
+        }
 
-        double integralValue = fFitModulationV2v3->Integral(jet.phi() - jetRadius, jet.phi() + jetRadius);
-        double rholocal = collision.rho() / (2 * jetRadius * temppara[0]) * integralValue;
-        registry.fill(HIST("h2_rholocal_cent"), centrality, rholocal, 1.0);
+        double low = phi - selectedJetsRadius;
+        double high = phi + selectedJetsRadius;
+        double integralValue = 0.0;
+        if (low < 0) {
+          integralValue += fFitModulationV2v3->Integral(low + twoPi, twoPi);
+          integralValue += fFitModulationV2v3->Integral(0, high);
+        } else if (high > twoPi) {
+          integralValue += fFitModulationV2v3->Integral(low, twoPi);
+          integralValue += fFitModulationV2v3->Integral(0, high - twoPi);
+        } else {
+          integralValue += fFitModulationV2v3->Integral(low, high);
+        }
+
+        double rholocal = 0.0;
+        if (integralValue <= 0) {
+          rholocal = collision.rho();
+          registry.fill(HIST("h_jet_pt_badRhoLocal"), jet.pt(), 1.0);
+          registry.fill(HIST("h_jet_phi_badRhoLocal"), jet.phi(), 1.0);
+          registry.fill(HIST("h_jet_eta_badRhoLocal"), jet.eta(), 1.0);
+          registry.fill(HIST("h_good_bad_ugly"), 1.5);
+          // LOGF(info, "integral rho_local got 0, checking jet info: pT=%.1f, eta=%.1f, phi=%.1f, integralValue=%.1f", jet.pt(), jet.eta(), jet.phi(), integralValue);
+        } else {
+          // integralValue = fFitModulationV2v3->Integral(phi - selectedJetsRadius, phi + selectedJetsRadius);
+          rholocal = collision.rho() / (2 * selectedJetsRadius * temppara[0]) * integralValue;
+          registry.fill(HIST("h_good_bad_ugly"), 0.5);
+        }
+        registry.fill(HIST("h_good_bad_ugly"), 2.5);
 
         if (nmode == cfgNmodA) {
-          double phiMinusPsi2;
+          double phiMinusPsi2 = 0.0;
           if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
             continue;
           }
-          phiMinusPsi2 = jet.phi() - ep2;
+          // phiMinusPsi2 = jet.phi() - ep2;
+          phiMinusPsi2 = RecoDecay::constrainAngle(jet.phi() - ep2, -o2::constants::math::PI);
+          float absDelta = std::abs(phiMinusPsi2);
+          registry.fill(HIST("h2_rholocal_cent"), centrality, rholocal, 1.0);
+          registry.fill(HIST("h2_averagerho_cent"), centrality, collision.rho(), 1.0);
+          registry.fill(HIST("h2_centrality_pT"), jet.pt(), centrality, 1.0);
 
           registry.fill(HIST("h2_phi_rholocal"), jet.phi() - ep2, rholocal, 1.0);
+          registry.fill(HIST("h2_phi_rholocal_absDelta"), absDelta, rholocal, 1.0);
+          registry.fill(HIST("h2_phi_averagerho_absDelta"), absDelta, collision.rho(), 1.0);
+
+          registry.fill(HIST("h2_rholocal_pt"), jet.pt(), rholocal, 1.0);
+          registry.fill(HIST("h2_rholocal_raw_pt"), jet.pt() - rholocal * jet.area(), rholocal, 1.0);
+          registry.fill(HIST("h2_averagerho_pt"), jet.pt(), collision.rho(), 1.0);
+          registry.fill(HIST("h2_averagerho_raw_pt"), jet.pt() - collision.rho() * jet.area(), collision.rho(), 1.0);
+
+          int lowPtCut = 20;
+          int mediumPtCut = 40;
+          int highPtCut = 70;
+          int highPtCutEnd = 100;
+
+          if (jet.pt() >= lowPtCut && jet.pt() < mediumPtCut) {
+            registry.fill(HIST("h2_phi_rholocal_absDelta_low"), absDelta, rholocal, 1.0);
+          } else if (jet.pt() >= mediumPtCut && jet.pt() < highPtCut) {
+            registry.fill(HIST("h2_phi_rholocal_absDelta_medium"), absDelta, rholocal, 1.0);
+          } else if (jet.pt() >= highPtCut && jet.pt() < highPtCutEnd) {
+            registry.fill(HIST("h2_phi_rholocal_absDelta_high"), absDelta, rholocal, 1.0);
+          }
+          registry.fill(HIST("h_jet_pt_inclusive_v2"), jet.pt() - (collision.rho() * jet.area()), 1.0);
           registry.fill(HIST("h_jet_pt_inclusive_v2_rho"), jet.pt() - (rholocal * jet.area()), 1.0);
 
-          if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+          if (jet.pt() > bumpLow && jet.pt() < bumpUp) {
+            histosQA.fill(HIST("h2_ep2_FT0C_FT0M_bumpRegion"), helperEP.GetEventPlane(collision.qvecRe()[detInd + 3], collision.qvecIm()[detInd + 3], nmode), helperEP.GetEventPlane(collision.qvecRe()[detIndFT0M + 3], collision.qvecIm()[detIndFT0M + 3], nmode), collision.cent());
+          }
+
+          // if ((absDelta < o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+          if (absDelta < o2::constants::math::PIQuarter || absDelta >= evtPlnAngleA * o2::constants::math::PIQuarter) {
+            registry.fill(HIST("h_jet_pt_in_plane_v2"), jet.pt() - (collision.rho() * jet.area()), 1.0);
+            registry.fill(HIST("h2_centrality_jet_pt_in_plane_v2"), centrality, jet.pt() - (collision.rho() * jet.area()), 1.0);
+
             registry.fill(HIST("h_jet_pt_in_plane_v2_rho"), jet.pt() - (rholocal * jet.area()), 1.0);
             registry.fill(HIST("h2_centrality_jet_pt_in_plane_v2_rho"), centrality, jet.pt() - (rholocal * jet.area()), 1.0);
+
+            registry.fill(HIST("h2_phi_rholocal_absDelta_low_inplane"), absDelta, rholocal, 1.0);
+            registry.fill(HIST("h2_phi_rholocal_absDelta_medium_inplane"), absDelta, rholocal, 1.0);
+            registry.fill(HIST("h2_phi_rholocal_absDelta_high_inplane"), absDelta, rholocal, 1.0);
+
+            registry.fill(HIST("h2_averagerho_pt_inplane"), jet.pt(), collision.rho(), 1.0);
+            registry.fill(HIST("h2_rholocal_pt_inplane"), jet.pt(), rholocal, 1.0);
           } else {
+            registry.fill(HIST("h_jet_pt_out_of_plane_v2"), jet.pt() - (collision.rho() * jet.area()), 1.0);
+            registry.fill(HIST("h2_centrality_jet_pt_out_of_plane_v2"), centrality, jet.pt() - (collision.rho() * jet.area()), 1.0);
+
             registry.fill(HIST("h_jet_pt_out_of_plane_v2_rho"), jet.pt() - (rholocal * jet.area()), 1.0);
             registry.fill(HIST("h2_centrality_jet_pt_out_of_plane_v2_rho"), centrality, jet.pt() - (rholocal * jet.area()), 1.0);
+
+            registry.fill(HIST("h2_phi_rholocal_absDelta_low_outplane"), absDelta, rholocal, 1.0);
+            registry.fill(HIST("h2_phi_rholocal_absDelta_medium_outplane"), absDelta, rholocal, 1.0);
+            registry.fill(HIST("h2_phi_rholocal_absDelta_high_outplane"), absDelta, rholocal, 1.0);
+
+            registry.fill(HIST("h2_averagerho_pt_outplane"), jet.pt(), collision.rho(), 1.0);
+            registry.fill(HIST("h2_rholocal_pt_outplane"), jet.pt(), rholocal, 1.0);
           }
         } else if (nmode == cfgNmodB) {
-          double phiMinusPsi3;
+          double phiMinusPsi3 = 0.0;
           if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
             continue;
           }
           ep3 = helperEP.GetEventPlane(collision.qvecRe()[detInd], collision.qvecIm()[detInd], nmode);
-          phiMinusPsi3 = jet.phi() - ep3;
+          // phiMinusPsi3 = jet.phi() - ep3;
+          phiMinusPsi3 = RecoDecay::constrainAngle(jet.phi() - ep3, -o2::constants::math::PI);
+          float absDelta3 = std::abs(phiMinusPsi3);
 
-          if ((phiMinusPsi3 < o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi3 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+          // if ((absDelta3 < o2::constants::math::PIQuarter) || (absDelta3 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta3 >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta3 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+          if (absDelta3 < o2::constants::math::PIQuarter || absDelta3 >= evtPlnAngleA * o2::constants::math::PIQuarter) {
+            registry.fill(HIST("h_jet_pt_in_plane_v3"), jet.pt() - (collision.rho() * jet.area()), 1.0);
             registry.fill(HIST("h_jet_pt_in_plane_v3_rho"), jet.pt() - (rholocal * jet.area()), 1.0);
           } else {
+            registry.fill(HIST("h_jet_pt_out_of_plane_v3"), jet.pt() - (collision.rho() * jet.area()), 1.0);
             registry.fill(HIST("h_jet_pt_out_of_plane_v3_rho"), jet.pt() - (rholocal * jet.area()), 1.0);
           }
         }
@@ -1753,47 +1709,64 @@ struct JetChargedV2 {
     }
     // RCpT
     for (uint i = 0; i < cfgnMods->size(); i++) {
-      TRandom3 randomNumber(0);
       float randomConeEta = randomNumber.Uniform(trackEtaMin + randomConeR, trackEtaMax - randomConeR);
       float randomConePhi = randomNumber.Uniform(0.0, o2::constants::math::TwoPI);
       float randomConePt = 0;
-      double integralValueRC = fFitModulationV2v3->Integral(randomConePhi - randomConeR, randomConePhi + randomConeR);
-      double rholocalRC = collision.rho() / (2 * randomConeR * temppara[0]) * integralValueRC;
+      double integralValueRC = 0.0;
+      double rholocalRC = 0.0;
+      integralValueRC = fFitModulationV2v3->Integral(randomConePhi - randomConeR, randomConePhi + randomConeR);
+      rholocalRC = collision.rho() / (2 * randomConeR * temppara[0]) * integralValueRC;
 
       int nmode = cfgnMods->at(i);
       if (nmode == cfgNmodA) {
-        double rcPhiPsi2;
-        rcPhiPsi2 = randomConePhi - ep2;
+        double rcPhiPsi2 = 0.0;
+        // double rcPhiPsi2Rand = 0.0;
+        float absRcPhiPsi2 = 0.0;
+
+        // rcPhiPsi2 = randomConePhi - ep2;
+        rcPhiPsi2 = RecoDecay::constrainAngle(randomConePhi - ep2, -o2::constants::math::PI);
+        absRcPhiPsi2 = std::abs(rcPhiPsi2);
 
         for (auto const& track : tracks) {
           if (jetderiveddatautilities::selectTrack(track, trackSelection)) {
-            float dPhi = RecoDecay::constrainAngle(track.phi() - randomConePhi, static_cast<float>(-o2::constants::math::PI));
+            float dPhi = RecoDecay::constrainAngle(track.phi() - randomConePhi, -o2::constants::math::PI);
             float dEta = track.eta() - randomConeEta;
             if (std::sqrt(dEta * dEta + dPhi * dPhi) < randomConeR) {
               randomConePt += track.pt();
             }
           }
         }
+        // registry.fill(HIST("h1_distribution_RC"), rcPhiPsi2);
         registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_localrhovsphi"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * rholocalRC, rcPhiPsi2, 1.0);
-
+        registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_localrhovsphi_abs"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * rholocalRC, absRcPhiPsi2, 1.0);
+        if (absRcPhiPsi2 < o2::constants::math::PIQuarter || absRcPhiPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) {
+          registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_localrhovsphi_abs_in"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * rholocalRC, absRcPhiPsi2, 1.0);
+        } else {
+          registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_localrhovsphi_abs_out"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * rholocalRC, absRcPhiPsi2, 1.0);
+        }
         // removing the leading jet from the random cone
         if (jets.size() > 0) { // if there are no jets in the acceptance (from the jetfinder cuts) then there can be no leading jet
-          float dPhiLeadingJet = RecoDecay::constrainAngle(jets.iteratorAt(0).phi() - randomConePhi, static_cast<float>(-o2::constants::math::PI));
-          float dEtaLeadingJet = jets.iteratorAt(0).eta() - randomConeEta;
+          float dPhiLeadingJet = RecoDecay::constrainAngle(leadingJetPhi - randomConePhi, -o2::constants::math::PI);
+          float dEtaLeadingJet = leadingJetEta - randomConeEta;
 
           bool jetWasInCone = false;
-          while ((randomConeLeadJetDeltaR <= 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < jets.iteratorAt(0).r() / 100.0 + randomConeR)) || (randomConeLeadJetDeltaR > 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < randomConeLeadJetDeltaR))) {
+          while ((randomConeLeadJetDeltaR <= 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < leadingJetR + randomConeR)) || (randomConeLeadJetDeltaR > 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < randomConeLeadJetDeltaR))) {
             jetWasInCone = true;
             randomConeEta = randomNumber.Uniform(trackEtaMin + randomConeR, trackEtaMax - randomConeR);
             randomConePhi = randomNumber.Uniform(0.0, o2::constants::math::TwoPI);
-            dPhiLeadingJet = RecoDecay::constrainAngle(jets.iteratorAt(0).phi() - randomConePhi, static_cast<float>(-o2::constants::math::PI));
-            dEtaLeadingJet = jets.iteratorAt(0).eta() - randomConeEta;
+            dPhiLeadingJet = RecoDecay::constrainAngle(leadingJetPhi - randomConePhi, -o2::constants::math::PI);
+            dEtaLeadingJet = leadingJetEta - randomConeEta;
           }
           if (jetWasInCone) {
             randomConePt = 0.0;
+            integralValueRC = fFitModulationV2v3->Integral(randomConePhi - randomConeR, randomConePhi + randomConeR);
+            rholocalRC = collision.rho() / (2 * randomConeR * temppara[0]) * integralValueRC;
+            rcPhiPsi2 = RecoDecay::constrainAngle(randomConePhi - ep2, -o2::constants::math::PI);
+            absRcPhiPsi2 = std::abs(rcPhiPsi2);
+
             for (auto const& track : tracks) {
-              if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > randomConeR)) { // if track selection is uniformTrack, dcaXY and dcaZ cuts need to be added as they aren't in the selection so that they can be studied here
-                float dPhi = RecoDecay::constrainAngle(track.phi() - randomConePhi, static_cast<float>(-o2::constants::math::PI));
+              if (jetderiveddatautilities::selectTrack(track, trackSelection)) { // if track selection is uniformTrack, dcaXY and dcaZ cuts need to be added as they aren't in the selection so that they can be studied here
+                float dPhi = RecoDecay::constrainAngle(track.phi() - randomConePhi, -o2::constants::math::PI);
                 float dEta = track.eta() - randomConeEta;
                 if (std::sqrt(dEta * dEta + dPhi * dPhi) < randomConeR) {
                   randomConePt += track.pt();
@@ -1804,6 +1777,17 @@ struct JetChargedV2 {
         }
         registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_localrhovsphiwithoutleadingjet"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * rholocalRC, rcPhiPsi2, 1.0);
         registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_rhorandomconewithoutleadingjet"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * collision.rho(), rcPhiPsi2, 1.0);
+        registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_localrhovsphiwithoutleadingjet_abs"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * rholocalRC, absRcPhiPsi2, 1.0);
+        registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_rhorandomconewithoutleadingjet_abs"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * collision.rho(), absRcPhiPsi2, 1.0);
+
+        if (absRcPhiPsi2 < o2::constants::math::PIQuarter || absRcPhiPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) {
+          registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_localrhovsphiwithoutleadingjet_abs_in"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * rholocalRC, absRcPhiPsi2, 1.0);
+          registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_rhorandomconewithoutleadingjet_abs_in"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * collision.rho(), absRcPhiPsi2, 1.0);
+        } else {
+          registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_localrhovsphiwithoutleadingjet_abs_out"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * rholocalRC, absRcPhiPsi2, 1.0);
+          registry.fill(HIST("h3_centrality_deltapT_RandomCornPhi_rhorandomconewithoutleadingjet_abs_out"), centrality, randomConePt - o2::constants::math::PI * randomConeR * randomConeR * collision.rho(), absRcPhiPsi2, 1.0);
+        }
+
       } else if (nmode == cfgNmodB) {
         continue;
       }
@@ -1880,7 +1864,8 @@ struct JetChargedV2 {
     double leadingJetPt = -1;
     double leadingJetPhi = -1;
     double leadingJetEta = -1;
-    fillLeadingJetQA(jets, leadingJetPt, leadingJetPhi, leadingJetEta);
+    double leadingJetR = -1;
+    fillLeadingJetQA(jets, leadingJetPt, leadingJetPhi, leadingJetEta, leadingJetR);
 
     int nTrk = 0;
     getNtrk(tracks, jets, nTrk, evtnum, leadingJetEta);
@@ -1937,7 +1922,8 @@ struct JetChargedV2 {
 
     hPtsumSumptFit->Fit(fFitModulationV2v3, "Q", "ep", 0, o2::constants::math::TwoPI);
 
-    double temppara[5];
+    // double temppara[5];
+    std::array<double, 5> temppara{};
     temppara[0] = fFitModulationV2v3->GetParameter(0);
     temppara[1] = fFitModulationV2v3->GetParameter(1);
     temppara[2] = fFitModulationV2v3->GetParameter(2);
@@ -1951,19 +1937,17 @@ struct JetChargedV2 {
     registry.fill(HIST("h_v3obs_centrality"), centrality, temppara[3]);
     registry.fill(HIST("h_evtnum_centrlity"), evtnum, centrality);
 
-    if (temppara[0] == 0) {
-      return;
-    }
-
     int nDF = 1;
     int numOfFreePara = 2;
     nDF = static_cast<int>(fFitModulationV2v3->GetXaxis()->GetNbins()) - numOfFreePara;
-    if (nDF == 0 || static_cast<float>(nDF) <= 0.)
+    if (nDF == 0 || static_cast<float>(nDF) <= 0.) {
       return;
+    }
     double chi2 = 0.;
     for (int i = 0; i < hPtsumSumptFit->GetXaxis()->GetNbins(); i++) {
-      if (hPtsumSumptFit->GetBinContent(i + 1) <= 0.)
+      if (hPtsumSumptFit->GetBinContent(i + 1) <= 0.) {
         continue;
+      }
       chi2 += std::pow((hPtsumSumptFit->GetBinContent(i + 1) - fFitModulationV2v3->Eval(hPtsumSumptFit->GetXaxis()->GetBinCenter(1 + i))), 2) / hPtsumSumptFit->GetBinContent(i + 1);
     }
 
@@ -2008,20 +1992,22 @@ struct JetChargedV2 {
           registry.fill(HIST("h_mcd_pt_before_matching_mcdprocess"), corrBasejetpt);
         }
 
-        double integralValue = fFitModulationV2v3->Integral(jet.phi() - jetRadius, jet.phi() + jetRadius);
-        double rholocal = collision.rho() / (2 * jetRadius * temppara[0]) * integralValue;
+        double integralValue = fFitModulationV2v3->Integral(jet.phi() - selectedJetsRadius, jet.phi() + selectedJetsRadius);
+        double rholocal = collision.rho() / (2 * selectedJetsRadius * temppara[0]) * integralValue;
         registry.fill(HIST("h2_rholocal_cent"), centrality, rholocal, 1.0);
 
         if (nmode == cfgNmodA) {
-          double phiMinusPsi2;
+          double phiMinusPsi2 = 0.0;
           if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
             continue;
           }
-          phiMinusPsi2 = jet.phi() - ep2;
+          // phiMinusPsi2 = jet.phi() - ep2;
+          phiMinusPsi2 = RecoDecay::constrainAngle(jet.phi() - ep2, -o2::constants::math::PI);
+          float absDelta = std::abs(phiMinusPsi2);
           registry.fill(HIST("h2_phi_rholocal"), jet.phi() - ep2, rholocal, 1.0);
           registry.fill(HIST("h_jet_pt_inclusive_v2_rho"), jet.pt() - (rholocal * jet.area()), 1.0);
 
-          if ((phiMinusPsi2 < o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi2 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi2 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+          if ((absDelta < o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta < evtPlnAngleC * o2::constants::math::PIQuarter)) {
             registry.fill(HIST("h_jet_pt_in_plane_v2_rho"), jet.pt() - (rholocal * jet.area()), 1.0);
             registry.fill(HIST("h2_centrality_jet_pt_in_plane_v2_rho"), centrality, jet.pt() - (rholocal * jet.area()), 1.0);
           } else {
@@ -2029,14 +2015,16 @@ struct JetChargedV2 {
             registry.fill(HIST("h2_centrality_jet_pt_out_of_plane_v2_rho"), centrality, jet.pt() - (rholocal * jet.area()), 1.0);
           }
         } else if (nmode == cfgNmodB) {
-          double phiMinusPsi3;
+          double phiMinusPsi3 = 0.0;
           if (collision.qvecAmp()[detId] < collQvecAmpDetId) {
             continue;
           }
           ep3 = helperEP.GetEventPlane(collision.qvecRe()[detInd], collision.qvecIm()[detInd], nmode);
-          phiMinusPsi3 = jet.phi() - ep3;
+          // phiMinusPsi3 = jet.phi() - ep3;
+          phiMinusPsi3 = RecoDecay::constrainAngle(jet.phi() - ep3, -o2::constants::math::PI);
+          float absDelta3 = std::abs(phiMinusPsi3);
 
-          if ((phiMinusPsi3 < o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (phiMinusPsi3 >= evtPlnAngleB * o2::constants::math::PIQuarter && phiMinusPsi3 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
+          if ((absDelta3 < o2::constants::math::PIQuarter) || (absDelta3 >= evtPlnAngleA * o2::constants::math::PIQuarter) || (absDelta3 >= evtPlnAngleB * o2::constants::math::PIQuarter && absDelta3 < evtPlnAngleC * o2::constants::math::PIQuarter)) {
             registry.fill(HIST("h_jet_pt_in_plane_v3_rho"), jet.pt() - (rholocal * jet.area()), 1.0);
           } else {
             registry.fill(HIST("h_jet_pt_out_of_plane_v3_rho"), jet.pt() - (rholocal * jet.area()), 1.0);
@@ -2046,7 +2034,6 @@ struct JetChargedV2 {
     }
     // RCpT
     for (uint i = 0; i < cfgnMods->size(); i++) {
-      TRandom3 randomNumber(0);
       float randomConeEta = randomNumber.Uniform(trackEtaMin + randomConeR, trackEtaMax - randomConeR);
       float randomConePhi = randomNumber.Uniform(0.0, o2::constants::math::TwoPI);
       float randomConePt = 0;
@@ -2055,12 +2042,13 @@ struct JetChargedV2 {
 
       int nmode = cfgnMods->at(i);
       if (nmode == cfgNmodA) {
-        double rcPhiPsi2;
-        rcPhiPsi2 = randomConePhi - ep2;
+        double rcPhiPsi2 = 0.0;
+        // rcPhiPsi2 = randomConePhi - ep2;
+        rcPhiPsi2 = RecoDecay::constrainAngle(randomConePhi - ep2, -o2::constants::math::PI);
 
         for (auto const& track : tracks) {
           if (jetderiveddatautilities::selectTrack(track, trackSelection)) {
-            float dPhi = RecoDecay::constrainAngle(track.phi() - randomConePhi, static_cast<float>(-o2::constants::math::PI));
+            float dPhi = RecoDecay::constrainAngle(track.phi() - randomConePhi, -o2::constants::math::PI);
             float dEta = track.eta() - randomConeEta;
             if (std::sqrt(dEta * dEta + dPhi * dPhi) < randomConeR) {
               randomConePt += track.pt();
@@ -2071,22 +2059,32 @@ struct JetChargedV2 {
 
         // removing the leading jet from the random cone
         if (jets.size() > 0) { // if there are no jets in the acceptance (from the jetfinder cuts) then there can be no leading jet
-          float dPhiLeadingJet = RecoDecay::constrainAngle(jets.iteratorAt(0).phi() - randomConePhi, static_cast<float>(-o2::constants::math::PI));
-          float dEtaLeadingJet = jets.iteratorAt(0).eta() - randomConeEta;
+          // float dPhiLeadingJet = RecoDecay::constrainAngle(jets.iteratorAt(0).phi() - randomConePhi, -o2::constants::math::PI);
+          // float dEtaLeadingJet = jets.iteratorAt(0).eta() - randomConeEta;
+          float dPhiLeadingJet = RecoDecay::constrainAngle(leadingJetPhi - randomConePhi, -o2::constants::math::PI);
+          float dEtaLeadingJet = leadingJetEta - randomConeEta;
 
           bool jetWasInCone = false;
-          while ((randomConeLeadJetDeltaR <= 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < jets.iteratorAt(0).r() / 100.0 + randomConeR)) || (randomConeLeadJetDeltaR > 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < randomConeLeadJetDeltaR))) {
+          // while ((randomConeLeadJetDeltaR <= 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < jets.iteratorAt(0).r() / 100.0 + randomConeR)) || (randomConeLeadJetDeltaR > 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < randomConeLeadJetDeltaR))) {
+          while ((randomConeLeadJetDeltaR <= 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < leadingJetR + randomConeR)) || (randomConeLeadJetDeltaR > 0 && (std::sqrt(dEtaLeadingJet * dEtaLeadingJet + dPhiLeadingJet * dPhiLeadingJet) < randomConeLeadJetDeltaR))) {
             jetWasInCone = true;
             randomConeEta = randomNumber.Uniform(trackEtaMin + randomConeR, trackEtaMax - randomConeR);
             randomConePhi = randomNumber.Uniform(0.0, o2::constants::math::TwoPI);
-            dPhiLeadingJet = RecoDecay::constrainAngle(jets.iteratorAt(0).phi() - randomConePhi, static_cast<float>(-o2::constants::math::PI));
+            dPhiLeadingJet = RecoDecay::constrainAngle(jets.iteratorAt(0).phi() - randomConePhi, -o2::constants::math::PI);
             dEtaLeadingJet = jets.iteratorAt(0).eta() - randomConeEta;
           }
           if (jetWasInCone) {
             randomConePt = 0.0;
             for (auto const& track : tracks) {
-              if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > randomConeR)) { // if track selection is uniformTrack, dcaXY and dcaZ cuts need to be added as they aren't in the selection so that they can be studied here
-                float dPhi = RecoDecay::constrainAngle(track.phi() - randomConePhi, static_cast<float>(-o2::constants::math::PI));
+              // if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > randomConeR)) { // if track selection is uniformTrack, dcaXY and dcaZ cuts need to be added as they aren't in the selection so that they can be studied here
+              //   float dPhi = RecoDecay::constrainAngle(track.phi() - randomConePhi, -o2::constants::math::PI);
+              //   float dEta = track.eta() - randomConeEta;
+              //   if (std::sqrt(dEta * dEta + dPhi * dPhi) < randomConeR) {
+              //     randomConePt += track.pt();
+              //   }
+              // }
+              if (jetderiveddatautilities::selectTrack(track, trackSelection)) { // if track selection is uniformTrack, dcaXY and dcaZ cuts need to be added as they aren't in the selection so that they can be studied here
+                float dPhi = RecoDecay::constrainAngle(track.phi() - randomConePhi, -o2::constants::math::PI);
                 float dEta = track.eta() - randomConeEta;
                 if (std::sqrt(dEta * dEta + dPhi * dPhi) < randomConeR) {
                   randomConePt += track.pt();
@@ -2117,7 +2115,7 @@ struct JetChargedV2 {
     if (!applyMCCollisionCuts(mccollision, collisions)) {
       return;
     }
-    registry.fill(HIST("h_mccollisions_zvertex"), mccollision.posZ());
+    registry.fill(HIST("h_mccollisions_zvertex_mcp"), mccollision.posZ());
 
     for (auto const& jet : jets) {
       if (!jetfindingutilities::isInEtaAcceptance(jet, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
@@ -2142,6 +2140,7 @@ struct JetChargedV2 {
     if (!applyMCCollisionCuts(mccollision, collisions)) {
       return;
     }
+    registry.fill(HIST("h_mccollisions_zvertex_mcp"), mccollision.posZ());
 
     for (auto const& jet : jets) {
       if (!jetfindingutilities::isInEtaAcceptance(jet, jetEtaMin, jetEtaMax, trackEtaMin, trackEtaMax)) {
@@ -2161,9 +2160,11 @@ struct JetChargedV2 {
       auto collTracks = tracks.sliceBy(tracksPerJCollision, collision.globalIndex());
       fillLeadingJetQAMCP(jets, leadingJetPt, leadingJetPhi, leadingJetEta);
 
+      double localRhoFitPtMin = 0.2;
+      double localRhoFitPtMax = 5;
       if (jets.size() > 0) {
         for (auto const& track : collTracks) {
-          if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > jetRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
+          if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > selectedJetsRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
             nTrk += 1;
           }
         }
@@ -2175,16 +2176,15 @@ struct JetChargedV2 {
 
       if (jets.size() > 0) {
         for (auto const& track : collTracks) {
-          if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > jetRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
+          if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > selectedJetsRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
             hPtsumSumptFitMCP->Fill(track.phi(), track.pt());
           }
         }
       }
       fitFncAreaSubMCP(collision, jets, hPtsumSumptFitMCP, mcLevelIsParticleLevel);
+      delete hPtsumSumptFitMCP;
+      delete fFitModulationV2v3P;
     }
-
-    delete hPtsumSumptFitMCP;
-    delete fFitModulationV2v3P;
     evtnum += 1;
   }
   PROCESS_SWITCH(JetChargedV2, processSigmaPtAreaSubMCP, "jet spectra with area-based subtraction for MC particle level", false);
@@ -2241,6 +2241,7 @@ struct JetChargedV2 {
     double mcrho = collision.has_mcCollision() ? collision.mcCollision_as<JetBkgRhoMcCollisions>().rho() : -1;
     registry.fill(HIST("h_mc_rho_matched"), mcrho);
 
+    auto collTracks = tracks.sliceBy(tracksPerJCollision, collision.globalIndex());
     for (const auto& mcdjet : mcdjets) {
       if (!isAcceptedJet<aod::JetTracks>(mcdjet)) {
         continue;
@@ -2253,21 +2254,23 @@ struct JetChargedV2 {
         leadingJetPt = mcdjet.pt();
         leadingJetEta = mcdjet.eta();
       }
+      registry.fill(HIST("leadJetPt"), leadingJetPt);
+      registry.fill(HIST("leadJetEta"), leadingJetEta);
       int nTrk = 0;
-      if (mcdjet.size() > 0) {
-        for (auto const& track : tracks) {
-          if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > jetRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
-            registry.fill(HIST("h_accept_Track"), 4.5);
-            nTrk += 1;
-          }
+      double localRhoFitPtMin = 0.2;
+      double localRhoFitPtMax = 5;
+      for (auto const& track : collTracks) {
+        if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > selectedJetsRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
+          registry.fill(HIST("h_accept_Track"), 4.5);
+          nTrk += 1;
         }
       }
       if (nTrk <= 0) {
         return;
       }
       hPtsumSumptFitRM = new TH1F("h_ptsum_sumpt_fit_RM", "h_ptsum_sumpt_RM fit use", TMath::CeilNint(std::sqrt(nTrk)), 0., o2::constants::math::TwoPI);
-      for (auto const& track : tracks) {
-        if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > jetRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
+      for (auto const& track : collTracks) {
+        if (jetderiveddatautilities::selectTrack(track, trackSelection) && (std::fabs(track.eta() - leadingJetEta) > selectedJetsRadius) && track.pt() >= localRhoFitPtMin && track.pt() <= localRhoFitPtMax) {
           registry.fill(HIST("h_accept_Track_Match"), 0.5);
           hPtsumSumptFitRM->Fill(track.phi(), track.pt());
         }
@@ -2317,7 +2320,7 @@ struct JetChargedV2 {
 
       hPtsumSumptFitRM->Fit(fFitModulationRM, "Q", "ep", 0, o2::constants::math::TwoPI);
 
-      float tempparaA;
+      float tempparaA = 0.f;
       tempparaA = fFitModulationRM->GetParameter(0);
 
       if (tempparaA == 0) {
@@ -2335,27 +2338,9 @@ struct JetChargedV2 {
     }
   }
   PROCESS_SWITCH(JetChargedV2, processJetsMatchedSubtracted, "matched mcp and mcd jets", false);
-
-  void processTracksQA(soa::Filtered<soa::Join<aod::JetCollisions, aod::BkgChargedRhos, aod::Qvectors>>::iterator const& collision,
-                       soa::Filtered<soa::Join<aod::JetTracks, aod::JTrackExtras>> const& tracks)
-  {
-    if (!jetderiveddatautilities::selectCollision(collision, eventSelectionBits)) {
-      return;
-    }
-    if (collision.trackOccupancyInTimeRange() < trackOccupancyInTimeRangeMin || trackOccupancyInTimeRangeMax < collision.trackOccupancyInTimeRange()) {
-      return;
-    }
-    for (auto const& track : tracks) {
-      if (!jetderiveddatautilities::selectTrack(track, trackSelection)) {
-        continue;
-      }
-      fillTrackHistograms(track);
-    }
-  }
-  PROCESS_SWITCH(JetChargedV2, processTracksQA, "QA for charged tracks", false);
 };
 
-WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
+WorkflowSpec defineDataProcessing(ConfigContext const& context)
 {
-  return WorkflowSpec{adaptAnalysisTask<JetChargedV2>(cfgc)};
+  return WorkflowSpec{adaptAnalysisTask<JetChargedV2>(context)};
 }

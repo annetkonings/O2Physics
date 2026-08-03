@@ -13,10 +13,13 @@
 /// \brief Source of class for V0 photon selection.
 /// \author D. Sekihata, daiki.sekihata@cern.ch
 
-#include "PWGEM/PhotonMeson/Core/V0PhotonCut.h"
+#include "V0PhotonCut.h"
 
-#include <Framework/Array2D.h>
+#include "PWGEM/PhotonMeson/Core/V0PhotonCandidate.h"
+
 #include <Framework/Logger.h>
+
+#include <sys/types.h>
 
 #include <Rtypes.h>
 
@@ -71,14 +74,20 @@ void V0PhotonCut::SetAPRange(float max_alpha, float max_qt)
 }
 void V0PhotonCut::SetMaxMeePsiPairDep(std::function<float(float)> psiDepCut)
 {
-  mMaxMeePsiPairDep = psiDepCut;
+  mMaxMeePsiPairDep = std::move(psiDepCut);
   LOG(info) << "V0 Photon Cut, set max mee psi pair dep: " << mMaxMeePsiPairDep(0.1);
 }
-void V0PhotonCut::SetRxyRange(float min, float max)
+void V0PhotonCut::SetRxyRange(float min, float max, float midL, float midH)
 {
   mMinRxy = min;
   mMaxRxy = max;
+  mMidRxyLow = midL;
+  mMidRxyHigh = midH;
   LOG(info) << "V0 Photon selection, set Rxy range: " << mMinRxy << " - " << mMaxRxy;
+  if (midL >= 0.f && midH >= 0.f && midH > midL) {
+    LOG(info) << "Rejecting Rxy interval: "
+              << mMidRxyLow << " - " << mMidRxyHigh;
+  }
 }
 void V0PhotonCut::SetMinCosPA(float min)
 {
@@ -115,6 +124,28 @@ void V0PhotonCut::RejectITSib(bool flag)
   mRejectITSib = flag;
   LOG(info) << "V0 Photon Cut, reject photon on ITSib: " << mRejectITSib;
 }
+
+void V0PhotonCut::setTooCloseType(V0PhotonCut::TooCloseCuts type)
+{
+  mTooCloseType = type;
+  LOG(info) << "V0 Photon Cut, TooCloseV0 cut type: " << static_cast<uint>(mTooCloseType);
+}
+void V0PhotonCut::setMinV0DistSquared(float value)
+{
+  mMinV0DistSquared = value;
+  LOG(info) << "V0 Photon Cut, min V0 distance squared: " << mMinV0DistSquared;
+}
+void V0PhotonCut::setDeltaR(float value)
+{
+  mDeltaR = value;
+  LOG(info) << "V0 Photon Cut, delta R for too close V0: " << mDeltaR;
+}
+void V0PhotonCut::setMinOpeningAngle(float value)
+{
+  mMinOpeningAngle = value;
+  LOG(info) << "V0 Photon Cut, min opening angle for too close V0: " << mMinOpeningAngle;
+}
+
 void V0PhotonCut::SetTPCNsigmaElRange(float min, float max)
 {
   mMinTPCNsigmaEl = min;
@@ -178,7 +209,7 @@ void V0PhotonCut::SetMaxDcaZ(float maxDcaZ)
 
 void V0PhotonCut::SetMaxDcaXYPtDep(std::function<float(float)> ptDepCut)
 {
-  mMaxDcaXYPtDep = ptDepCut;
+  mMaxDcaXYPtDep = std::move(ptDepCut);
   LOG(info) << "V0 Photon Cut, set max DCA xy pt dep: " << mMaxDcaXYPtDep(1.0);
 }
 
@@ -297,21 +328,23 @@ void V0PhotonCut::SetBinsCentMl(const std::vector<double>& binsCent)
   LOG(info) << "V0 Photon Cut, set bins centrality ML with size:" << mBinsCentMl.size();
 }
 
-void V0PhotonCut::SetCutsPCMMl(const o2::framework::LabeledArray<double>& cuts)
+void V0PhotonCut::SetCutsMl(const std::vector<double>& cuts)
 {
-  mCutsPCMMl = cuts;
-  LOG(info) << "V0 Photon Cut, set cuts PCM ML";
+  mCutsMlFlat = cuts;
+  LOG(info) << "V0 Photon Cut, set cuts ML with size:" << mCutsMlFlat.size();
 }
 
 void V0PhotonCut::SetNClassesMl(int nClasses)
 {
   mNClassesMl = nClasses;
+  mOutputML.reserve(mNClassesMl);
   LOG(info) << "V0 Photon Cut, set number of classes ML: " << mNClassesMl;
 }
 
-void V0PhotonCut::SetNamesInputFeatures(const std::vector<std::string>& featureNames)
+void V0PhotonCut::SetNamesInputFeatures(const std::vector<std::string>& namesInputFeaturesVec)
 {
-  mNamesInputFeatures = featureNames;
+  mNamesInputFeatures = namesInputFeaturesVec;
+  mMlInputFeatures.reserve(mNamesInputFeatures.size());
   LOG(info) << "V0 Photon Cut, set ML input feature names with size:" << mNamesInputFeatures.size();
 }
 
@@ -328,4 +361,28 @@ void V0PhotonCut::SetCutDirMl(const std::vector<int>& cutDirMl)
 {
   mCutDirMl = cutDirMl;
   LOG(info) << "V0 Photon Cut, set ML cut directions with size:" << mCutDirMl.size();
+}
+
+void V0PhotonCut::SetCentralityTypeMl(CentType centType)
+{
+  mCentralityTypeMl = centType;
+  LOG(info) << "V0 Photon Cut, set centrality type ML: " << mCentralityTypeMl << " (0: CentFT0M, 1: CentFT0A, 2: CentFT0C)";
+}
+
+void V0PhotonCut::SetLabelsBinsMl(const std::vector<std::string>& labelsBins)
+{
+  mLabelsBinsMl = labelsBins;
+  LOG(info) << "V0 Photon Cut, set ML labels bins with size:" << mLabelsBinsMl.size();
+}
+
+void V0PhotonCut::SetLabelsCutScoresMl(const std::vector<std::string>& labelsCutScores)
+{
+  mLabelsCutScoresMl = labelsCutScores;
+  LOG(info) << "V0 Photon Cut, set ML labels cut scores with size:" << mLabelsCutScoresMl.size();
+}
+
+void V0PhotonCut::setDoQA(bool flag)
+{
+  mDoQA = flag;
+  LOG(info) << "V0 Photon Cut, set do QA flag to: " << mDoQA;
 }

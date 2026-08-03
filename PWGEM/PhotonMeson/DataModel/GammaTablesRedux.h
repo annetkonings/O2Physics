@@ -21,9 +21,9 @@
 
 #include <Framework/ASoA.h>
 #include <Framework/AnalysisDataModel.h>
+#include <Framework/Logger.h>
 
-#include <fairlogger/Logger.h>
-
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -47,7 +47,7 @@ enum Observable {
 };
 
 // Values in tables are stored in downscaled format to save disk space
-const float downscalingFactors[nObservables]{
+constexpr std::array<float, nObservables> downscalingFactors{
   1E0, // Cluster definition
   1E3, // Cluster energy
   1E4, // Cluster eta

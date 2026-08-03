@@ -22,6 +22,7 @@
 #include "PWGEM/PhotonMeson/Core/PHOSPhotonCut.h"
 #include "PWGEM/PhotonMeson/Core/PairCut.h"
 #include "PWGEM/PhotonMeson/Core/V0PhotonCut.h"
+#include "PWGEM/PhotonMeson/DataModel/EventTables.h"
 #include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
 #include "PWGEM/PhotonMeson/Utils/PairUtilities.h"
 
@@ -42,6 +43,7 @@
 
 #include <Math/GenVector/AxisAngle.h>
 #include <Math/GenVector/Rotation3D.h>
+#include <Math/Vector4D.h> // IWYU pragma: keep (do not replace with Math/Vector4Dfwd.h)
 #include <Math/Vector4Dfwd.h>
 #include <THashList.h>
 #include <TString.h>
@@ -65,14 +67,11 @@ using namespace o2::soa;
 using namespace o2::aod::pwgem::photonmeson::photonpair;
 using namespace o2::aod::pwgem::photon;
 
-using MyCollisions = soa::Join<aod::EMEvents, aod::EMEventsAlias, aod::EMEventsMult, aod::EMEventsCent>;
+using MyCollisions = soa::Join<aod::PMEvents, aod::EMEventsAlias, aod::EMEventsMult_000, aod::EMEventsCent_000>;
 using MyCollision = MyCollisions::iterator;
 
 using MyV0Photons = soa::Join<aod::V0PhotonsKF, aod::V0KFEMEventIds>;
 using MyV0Photon = MyV0Photons::iterator;
-
-using MyDalitzEEs = soa::Join<aod::DalitzEEs, aod::DalitzEEEMEventIds>;
-using MyDalitzEE = MyDalitzEEs::iterator;
 
 struct TagAndProbe {
   Configurable<int> cfgCentEstimator{"cfgCentEstimator", 2, "FT0M:0, FT0A:1, FT0C:2"};
@@ -134,14 +133,14 @@ struct TagAndProbe {
   template <typename TTagCut, typename TProbeCuts, typename TPairCuts>
   void add_pair_histograms(THashList* list_pair, const std::string pairname, TTagCut const& tagcut, TProbeCuts const& probecuts, TPairCuts const& paircuts)
   {
-    std::string cutname1 = tagcut.GetName();
+    std::string cutname1 = tagcut.getName();
     for (auto& cut2 : probecuts) {
-      std::string cutname2 = cut2.GetName();
+      std::string cutname2 = cut2.getName();
       std::string photon_cut_name = cutname1 + "_" + cutname2;
       THashList* list_pair_subsys_photoncut = o2::aod::pwgem::photon::histogram::AddHistClass(list_pair, photon_cut_name.data());
 
       for (auto& cut3 : paircuts) {
-        std::string pair_cut_name = cut3.GetName();
+        std::string pair_cut_name = cut3.getName();
         o2::aod::pwgem::photon::histogram::AddHistClass(list_pair_subsys_photoncut, pair_cut_name.data());
         THashList* list_pair_subsys_paircut = reinterpret_cast<THashList*>(list_pair_subsys_photoncut->FindObject(pair_cut_name.data()));
         o2::aod::pwgem::photon::histogram::DefineHistograms(list_pair_subsys_paircut, "tag_and_probe", pairname.data());
@@ -248,7 +247,7 @@ struct TagAndProbe {
     LOGF(info, "Number of Pair cuts = %d", fPairCuts.size());
   }
 
-  Preslice<MyV0Photons> perCollision = aod::v0photonkf::emeventId;
+  Preslice<MyV0Photons> perCollision = aod::v0photonkf::pmeventId;
   Preslice<aod::PHOSClusters> perCollision_phos = aod::skimmedcluster::collisionId;
   Preslice<aod::SkimEMCClusters> perCollision_emc = aod::skimmedcluster::collisionId;
 
@@ -316,7 +315,7 @@ struct TagAndProbe {
               if (abs(v12.Rapidity()) > maxY) {
                 continue;
               }
-              reinterpret_cast<TH2F*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.GetName(), probecut.GetName()))->FindObject(paircut.GetName())->FindObject("hMggPt_Probe_Same"))->Fill(v12.M(), v2.Pt());
+              reinterpret_cast<TH2F*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.getName().c_str(), probecut.getName().c_str()))->FindObject(paircut.getName().c_str())->FindObject("hMggPt_Probe_Same"))->Fill(v12.M(), v2.Pt());
 
               if constexpr (pairtype == PairType::kPCMPCM) {
                 if (!probecut.template IsSelected<decltype(g2), TLegs>(g2)) {
@@ -332,7 +331,7 @@ struct TagAndProbe {
                 }
               }
 
-              reinterpret_cast<TH2F*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.GetName(), probecut.GetName()))->FindObject(paircut.GetName())->FindObject("hMggPt_PassingProbe_Same"))->Fill(v12.M(), v2.Pt());
+              reinterpret_cast<TH2F*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.getName().c_str(), probecut.getName().c_str()))->FindObject(paircut.getName().c_str())->FindObject("hMggPt_PassingProbe_Same"))->Fill(v12.M(), v2.Pt());
 
               if constexpr (pairtype == PairType::kEMCEMC) {
                 RotationBackground<aod::SkimEMCClusters>(v12, v1, v2, photons2_coll, g1.globalIndex(), g2.globalIndex(), probecut, paircut);
@@ -407,7 +406,7 @@ struct TagAndProbe {
               if (abs(v12.Rapidity()) > maxY) {
                 continue;
               }
-              reinterpret_cast<TH2F*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.GetName(), probecut.GetName()))->FindObject(paircut.GetName())->FindObject("hMggPt_Probe_Mixed"))->Fill(v12.M(), v2.Pt());
+              reinterpret_cast<TH2F*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.getName().c_str(), probecut.getName().c_str()))->FindObject(paircut.getName().c_str())->FindObject("hMggPt_Probe_Mixed"))->Fill(v12.M(), v2.Pt());
 
               if constexpr (pairtype == PairType::kPCMPCM) {
                 if (!probecut.template IsSelected<decltype(g2), TLegs>(g2)) {
@@ -423,7 +422,7 @@ struct TagAndProbe {
                 }
               }
 
-              reinterpret_cast<TH2F*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.GetName(), probecut.GetName()))->FindObject(paircut.GetName())->FindObject("hMggPt_PassingProbe_Mixed"))->Fill(v12.M(), v2.Pt());
+              reinterpret_cast<TH2F*>(list_pair_ss->FindObject(Form("%s_%s", tagcut.getName().c_str(), probecut.getName().c_str()))->FindObject(paircut.getName().c_str())->FindObject("hMggPt_PassingProbe_Mixed"))->Fill(v12.M(), v2.Pt());
 
             } // end of probe cut loop
           } // end of pair cut loop
@@ -485,10 +484,10 @@ struct TagAndProbe {
       // LOG(info) << "openingAngle2_2 = " << openingAngle2_2;
 
       if (openingAngle1 > minOpenAngle) {
-        reinterpret_cast<TH2F*>(fMainList->FindObject("Pair")->FindObject("EMCEMC")->FindObject(Form("%s_%s", cut.GetName(), cut.GetName()))->FindObject(paircut.GetName())->FindObject("hMggPt_Same_RotatedBkg"))->Fill(mother1.M(), mother1.Pt());
+        reinterpret_cast<TH2F*>(fMainList->FindObject("Pair")->FindObject("EMCEMC")->FindObject(Form("%s_%s", cut.getName().c_str(), cut.getName().c_str()))->FindObject(paircut.getName().c_str())->FindObject("hMggPt_Same_RotatedBkg"))->Fill(mother1.M(), mother1.Pt());
       }
       if (openingAngle2 > minOpenAngle) {
-        reinterpret_cast<TH2F*>(fMainList->FindObject("Pair")->FindObject("EMCEMC")->FindObject(Form("%s_%s", cut.GetName(), cut.GetName()))->FindObject(paircut.GetName())->FindObject("hMggPt_Same_RotatedBkg"))->Fill(mother2.M(), mother2.Pt());
+        reinterpret_cast<TH2F*>(fMainList->FindObject("Pair")->FindObject("EMCEMC")->FindObject(Form("%s_%s", cut.getName().c_str(), cut.getName().c_str()))->FindObject(paircut.getName().c_str())->FindObject("hMggPt_Same_RotatedBkg"))->Fill(mother2.M(), mother2.Pt());
       }
     }
   }

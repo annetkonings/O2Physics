@@ -20,20 +20,23 @@
 #include "PWGCF/Femto/Core/modes.h"
 #include "PWGCF/Femto/Core/trackHistManager.h"
 
-#include "CommonConstants/MathConstants.h"
-#include "Framework/Configurable.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/HistogramSpec.h"
+#include <CommonConstants/MathConstants.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/Logger.h>
+
+#include <TH1.h>
+#include <TPDGCode.h>
 
 #include <array>
+#include <cstddef>
 #include <map>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace o2::analysis::femto
-{
-namespace v0histmanager
+namespace o2::analysis::femto::v0histmanager
 {
 // enum for track histograms
 enum V0Hist {
@@ -43,6 +46,7 @@ enum V0Hist {
   kPhi,
   kMass,
   kSign,
+  kPtVsMass, // nice to have during analysis
   // qa variables
   kMassLambda,
   kMassAntiLambda,
@@ -89,32 +93,38 @@ enum V0Hist {
 
 constexpr std::size_t MaxSecondary = 3;
 
-#define V0_DEFAULT_BINNING(defaultMassMin, defaultMassMax)                                         \
-  o2::framework::ConfigurableAxis pt{"pt", {{600, 0, 6}}, "Pt"};                                   \
-  o2::framework::ConfigurableAxis eta{"eta", {{300, -1.5, 1.5}}, "Eta"};                           \
-  o2::framework::ConfigurableAxis phi{"phi", {{720, 0, 1.f * o2::constants::math::TwoPI}}, "Phi"}; \
-  o2::framework::ConfigurableAxis mass{"mass", {{200, defaultMassMin, defaultMassMax}}, "Mass"};   \
-  o2::framework::ConfigurableAxis sign{"sign", {{3, -1.5, 1.5}}, "Sign"};                          \
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define V0_DEFAULT_BINNING(defaultMassMin, defaultMassMax)                                           \
+  o2::framework::ConfigurableAxis pt{"pt", {{600, 0, 6}}, "Pt"};                                     \
+  o2::framework::ConfigurableAxis eta{"eta", {{300, -1.5, 1.5}}, "Eta"};                             \
+  o2::framework::ConfigurableAxis phi{"phi", {{720, 0, 1.f * o2::constants::math::TwoPI}}, "Phi"};   \
+  o2::framework::ConfigurableAxis mass{"mass", {{200, (defaultMassMin), (defaultMassMax)}}, "Mass"}; \
+  o2::framework::ConfigurableAxis sign{"sign", {{3, -1.5, 1.5}}, "Sign"};                            \
   o2::framework::ConfigurableAxis pdgCodes{"pdgCodes", {{8001, -4000.5, 4000.5}}, "MC ONLY: PDG codes of reconstructed V0s"};
 
-template <const char* Prefix>
+template <auto& Prefix>
 struct ConfLambdaBinning : o2::framework::ConfigurableGroup {
   std::string prefix = Prefix;
   V0_DEFAULT_BINNING(1.0, 1.2)
 };
-template <const char* Prefix>
+template <auto& Prefix>
 struct ConfK0shortBinning : o2::framework::ConfigurableGroup {
   std::string prefix = Prefix;
   V0_DEFAULT_BINNING(0.475, 0.515)
 };
+
 #undef V0_DEFAULT_BINNING
 
 constexpr const char PrefixLambdaBinning1[] = "LambdaBinning1";
 using ConfLambdaBinning1 = ConfLambdaBinning<PrefixLambdaBinning1>;
+constexpr const char PrefixLambdaBinning2[] = "LambdaBinning2";
+using ConfLambdaBinning2 = ConfLambdaBinning<PrefixLambdaBinning2>;
 constexpr const char PrefixK0shortBinning1[] = "K0shortBinning1";
 using ConfK0shortBinning1 = ConfK0shortBinning<PrefixK0shortBinning1>;
+constexpr const char PrefixK0shortBinning2[] = "K0shortBinning2";
+using ConfK0shortBinning2 = ConfK0shortBinning<PrefixK0shortBinning2>;
 
-template <const char* Prefix>
+template <auto& Prefix>
 struct ConfV0QaBinning : o2::framework::ConfigurableGroup {
   std::string prefix = Prefix;
   o2::framework::Configurable<bool> plot2d{"plot2d", true, "Generate various 2D QA plots"};
@@ -138,124 +148,130 @@ using ConfK0shortQaBinning1 = ConfV0QaBinning<PrefixK0shortQaBinning1>;
 // must be in sync with enum TrackVariables
 // the enum gives the correct index in the array
 constexpr std::array<histmanager::HistInfo<V0Hist>, kV0HistLast> HistTable = {
-  {{kPt, o2::framework::kTH1F, "hPt", "Transverse Momentum; p_{T} (GeV/#it{c}); Entries"},
-   {kEta, o2::framework::kTH1F, "hEta", "Pseudorapdity; #eta; Entries"},
-   {kPhi, o2::framework::kTH1F, "hPhi", "Azimuthal angle; #varphi; Entries"},
-   {kMass, o2::framework::kTH1F, "hMass", "Invariant Mass; m_{Inv} (GeV/#it{c}^{2}); Entries"},
-   {kSign, o2::framework::kTH1F, "hSign", "Sign (-1 -> antiparticle, 0 -> self conjugate, +1 -> particle); sign; Entries"},
-   {kMassLambda, o2::framework::kTH1F, "hMassLambda", "#Lambda mass; m_{p#pi^{-}} (GeV/#it{c}^{2}); Entries"},
-   {kMassAntiLambda, o2::framework::kTH1F, "hMassAntiLambda", "#bar{#Lambda} mass; m_{#bar{p}#pi^{+}} (GeV/#it{c}^{2}); Entries"},
-   {kMassK0short, o2::framework::kTH1F, "hMassK0short", "K^{0}_{s} mass; m_{#pi^{+}#pi^{-}} (GeV/#it{c}^{2}); Entries"},
-   {kCosPa, o2::framework::kTH1F, "hCosPa", "Cosine of pointing angle; cos(#alpha); Entries"},
-   {kDecayDauDca, o2::framework::kTH1F, "hDauDca", "Daughter DCA at decay vertex ; DCA_{Decay vertex} (cm); Entries"},
-   {kDecayVtxX, o2::framework::kTH1F, "hDecayVtxX", "X coordinate of decay vertex ; DV_{X} (cm); Entries"},
-   {kDecayVtxY, o2::framework::kTH1F, "hDecayVtxY", "Y coordinate of decay vertex ; DV_{Y} (cm); Entries"},
-   {kDecayVtxZ, o2::framework::kTH1F, "hDecayVtxZ", "Z coordinate of decay vertex ; DV_{Z} (cm); Entries"},
-   {kDecayVtx, o2::framework::kTH1F, "hDecayVtx", "Distance of decay vertex from primary vertex ; DV (cm); Entries"},
-   {kTransRadius, o2::framework::kTH1F, "hTransRadius", "Transverse radius ; r_{xy} (cm); Entries"},
-   {kPtVsEta, o2::framework::kTH2F, "hPtVsEta", "p_{T} vs #eta; p_{T} (GeV/#it{c}) ; #eta"},
-   {kPtVsPhi, o2::framework::kTH2F, "hPtVsPhi", "p_{T} vs #varphi; p_{T} (GeV/#it{c}) ; #varphi"},
-   {kPhiVsEta, o2::framework::kTH2F, "hPhiVsEta", "#varphi vs #eta; #varphi ; #eta"},
-   {kPtVsCosPa, o2::framework::kTH2F, "hPtVsCosPa", "Cosine of poiting angle vs p_{T}; cos(#alpha); p_{T} (GeV/#it{c})"},
-   {kPtVsLambdaMass, o2::framework::kTH2F, "hPtVsLambdaMass", "p_{T} vs #Lambda mass; p_{T} (GeV/#it{c}); m_{p#pi^{-}} (GeV/#it{c}^{2})"},
-   {kPtVsAntiLambdaMass, o2::framework::kTH2F, "hPtVsAntiLambdaMass", "p_{T} vs #bar{#Lambda} mass; p_{T} (GeV/#it{c}); m_{#bar{p}#pi^{+}} (GeV/#it{c}^{2})"},
-   {kPtVsK0shortMass, o2::framework::kTH2F, "hPtVsK0shortMass", "p_{T} vs K^{0}_{S} mass; p_{T} (GeV/#it{c}); m_{#pi^{+}#pi^{-}} (GeV/#it{c}^{2})"},
-   {kK0shortMassVsLambdaMass, o2::framework::kTH2F, "hK0shortMassVsLambdaMass", " K^{0}_{S} mass vs #Lambda mass; m_{#pi^{+}#pi^{-}} (GeV/#it{c}^{2}); m_{p#pi^{-}} (GeV/#it{c}^{2})"},
-   {kK0shortMassVsAntiLambdaMass, o2::framework::kTH2F, "hK0shortMassVsAntiLambdaMass", "K^{0}_{S} mass vs #bar{#Lambda} mass; m_{#pi^{+}#pi^{-}} (GeV/#it{c}^{2}); m_{#bar{p}#pi^{+}} (GeV/#it{c}^{2})"},
-   {kLambdaMassVsAntiLambdaMass, o2::framework::kTH2F, "hLambdaMassVsAntiLambdaMass", "#Lambda mass vs #bar{#Lambda}; m_{p#pi^{-}} (GeV/#it{c}^{2}); m_{#bar{p}#pi^{+}} (GeV/#it{c}^{2})"},
-   {kOrigin, o2::framework::kTH1F, "hOrigin", "Status Codes (=Origin); Status Code; Entries"},
-   {kPdg, o2::framework::kTH1F, "hPdg", "PDG Codes of reconstructed v0; PDG Code; Entries"},
-   {kPdgMother, o2::framework::kTH1F, "hPdgMother", "PDG Codes of mother of reconstructed v0; PDG Code; Entries"},
-   {kPdgPartonicMother, o2::framework::kTH1F, "hPdgPartonicMother", "PDG Codes of partonic mother of reconstructed v0; PDG Code; Entries"},
-   {kTruePtVsPt, o2::framework::kTH2F, "hTruePtVsPt", "True transverse momentum vs transverse momentum; p_{T,True} (GeV/#it{c}); p_{T,True} (GeV/#it{c})"},
-   {kTrueEtaVsEta, o2::framework::kTH2F, "hTrueEtaVsEta", "True pseudorapdity vs pseudorapdity; #eta_{True}; #eta"},
-   {kTruePhiVsPhi, o2::framework::kTH2F, "hTruePhiVsPhi", "True azimuthal angle vs azimuthal angle; #varphi_{True}; #varphi"},
-   {kNoMcParticle, o2::framework::kTH2F, "hNoMcParticle", "Wrongly reconstructed particles; p_{T} (GeV/#it{c}); cos(#alpha)"},
-   {kPrimary, o2::framework::kTH2F, "hPrimary", "Primary particles; p_{T} (GeV/#it{c}); cos(#alpha)"},
-   {kFromWrongCollision, o2::framework::kTH2F, "hFromWrongCollision", "Particles associated to wrong collision; p_{T} (GeV/#it{c}); cos(#alpha)"},
-   {kFromMaterial, o2::framework::kTH2F, "hFromMaterial", "Particles from material; p_{T} (GeV/#it{c}); cos(#alpha)"},
-   {kMissidentified, o2::framework::kTH2F, "hMissidentified", "Missidentified particles (fake/wrong PDG code); p_{T} (GeV/#it{c}); cos(#alpha)"},
-   {kSecondary1, o2::framework::kTH2F, "hFromSecondary1", "Particles from secondary decay; p_{T} (GeV/#it{c}); cos(#alpha)"},
-   {kSecondary2, o2::framework::kTH2F, "hFromSecondary2", "Particles from seconary decay; p_{T} (GeV/#it{c}); cos(#alpha)"},
-   {kSecondary3, o2::framework::kTH2F, "hFromSecondary3", "Particles from seconary decay; p_{T} (GeV/#it{c}); cos(#alpha)"},
-   {kSecondaryOther, o2::framework::kTH2F, "hFromSecondaryOther", "Particles from every other seconary decay; p_{T} (GeV/#it{c}); cos(#alpha)"}},
+  {{kPt, o2::framework::HistType::kTH1F, "hPt", "Transverse Momentum; p_{T} (GeV/#it{c}); Entries"},
+   {kEta, o2::framework::HistType::kTH1F, "hEta", "Pseudorapdity; #eta; Entries"},
+   {kPhi, o2::framework::HistType::kTH1F, "hPhi", "Azimuthal angle; #varphi; Entries"},
+   {kMass, o2::framework::HistType::kTH1F, "hMass", "Invariant Mass; m_{Inv} (GeV/#it{c}^{2}); Entries"},
+   {kSign, o2::framework::HistType::kTH1F, "hSign", "Sign (-1 -> antiparticle, 0 -> self conjugate, +1 -> particle); sign; Entries"},
+   {kPtVsMass, o2::framework::HistType::kTH2F, "hPtVsMass", "Transverse momentum vs invariant mass; p_{T} (GeV/#it{c}); m_{Inv} (GeV/#it{c}^{2})"},
+   {kMassLambda, o2::framework::HistType::kTH1F, "hMassLambda", "#Lambda mass; m_{p#pi^{-}} (GeV/#it{c}^{2}); Entries"},
+   {kMassAntiLambda, o2::framework::HistType::kTH1F, "hMassAntiLambda", "#bar{#Lambda} mass; m_{#bar{p}#pi^{+}} (GeV/#it{c}^{2}); Entries"},
+   {kMassK0short, o2::framework::HistType::kTH1F, "hMassK0short", "K^{0}_{s} mass; m_{#pi^{+}#pi^{-}} (GeV/#it{c}^{2}); Entries"},
+   {kCosPa, o2::framework::HistType::kTH1F, "hCosPa", "Cosine of pointing angle; cos(#alpha); Entries"},
+   {kDecayDauDca, o2::framework::HistType::kTH1F, "hDauDca", "Daughter DCA at decay vertex ; DCA_{Decay vertex} (cm); Entries"},
+   {kDecayVtxX, o2::framework::HistType::kTH1F, "hDecayVtxX", "X coordinate of decay vertex ; DV_{X} (cm); Entries"},
+   {kDecayVtxY, o2::framework::HistType::kTH1F, "hDecayVtxY", "Y coordinate of decay vertex ; DV_{Y} (cm); Entries"},
+   {kDecayVtxZ, o2::framework::HistType::kTH1F, "hDecayVtxZ", "Z coordinate of decay vertex ; DV_{Z} (cm); Entries"},
+   {kDecayVtx, o2::framework::HistType::kTH1F, "hDecayVtx", "Distance of decay vertex from primary vertex ; DV (cm); Entries"},
+   {kTransRadius, o2::framework::HistType::kTH1F, "hTransRadius", "Transverse radius ; r_{xy} (cm); Entries"},
+   {kPtVsEta, o2::framework::HistType::kTH2F, "hPtVsEta", "p_{T} vs #eta; p_{T} (GeV/#it{c}) ; #eta"},
+   {kPtVsPhi, o2::framework::HistType::kTH2F, "hPtVsPhi", "p_{T} vs #varphi; p_{T} (GeV/#it{c}) ; #varphi"},
+   {kPhiVsEta, o2::framework::HistType::kTH2F, "hPhiVsEta", "#varphi vs #eta; #varphi ; #eta"},
+   {kPtVsCosPa, o2::framework::HistType::kTH2F, "hPtVsCosPa", "Cosine of poiting angle vs p_{T}; cos(#alpha); p_{T} (GeV/#it{c})"},
+   {kPtVsLambdaMass, o2::framework::HistType::kTH2F, "hPtVsLambdaMass", "p_{T} vs #Lambda mass; p_{T} (GeV/#it{c}); m_{p#pi^{-}} (GeV/#it{c}^{2})"},
+   {kPtVsAntiLambdaMass, o2::framework::HistType::kTH2F, "hPtVsAntiLambdaMass", "p_{T} vs #bar{#Lambda} mass; p_{T} (GeV/#it{c}); m_{#bar{p}#pi^{+}} (GeV/#it{c}^{2})"},
+   {kPtVsK0shortMass, o2::framework::HistType::kTH2F, "hPtVsK0shortMass", "p_{T} vs K^{0}_{S} mass; p_{T} (GeV/#it{c}); m_{#pi^{+}#pi^{-}} (GeV/#it{c}^{2})"},
+   {kK0shortMassVsLambdaMass, o2::framework::HistType::kTH2F, "hK0shortMassVsLambdaMass", " K^{0}_{S} mass vs #Lambda mass; m_{#pi^{+}#pi^{-}} (GeV/#it{c}^{2}); m_{p#pi^{-}} (GeV/#it{c}^{2})"},
+   {kK0shortMassVsAntiLambdaMass, o2::framework::HistType::kTH2F, "hK0shortMassVsAntiLambdaMass", "K^{0}_{S} mass vs #bar{#Lambda} mass; m_{#pi^{+}#pi^{-}} (GeV/#it{c}^{2}); m_{#bar{p}#pi^{+}} (GeV/#it{c}^{2})"},
+   {kLambdaMassVsAntiLambdaMass, o2::framework::HistType::kTH2F, "hLambdaMassVsAntiLambdaMass", "#Lambda mass vs #bar{#Lambda}; m_{p#pi^{-}} (GeV/#it{c}^{2}); m_{#bar{p}#pi^{+}} (GeV/#it{c}^{2})"},
+   {kOrigin, o2::framework::HistType::kTH1F, "hOrigin", "Status Codes (=Origin); Status Code; Entries"},
+   {kPdg, o2::framework::HistType::kTH1F, "hPdg", "PDG Codes of reconstructed v0; PDG Code; Entries"},
+   {kPdgMother, o2::framework::HistType::kTH1F, "hPdgMother", "PDG Codes of mother of reconstructed v0; PDG Code; Entries"},
+   {kPdgPartonicMother, o2::framework::HistType::kTH1F, "hPdgPartonicMother", "PDG Codes of partonic mother of reconstructed v0; PDG Code; Entries"},
+   {kTruePtVsPt, o2::framework::HistType::kTH2F, "hTruePtVsPt", "True transverse momentum vs transverse momentum; p_{T,True} (GeV/#it{c}); p_{T,True} (GeV/#it{c})"},
+   {kTrueEtaVsEta, o2::framework::HistType::kTH2F, "hTrueEtaVsEta", "True pseudorapdity vs pseudorapdity; #eta_{True}; #eta"},
+   {kTruePhiVsPhi, o2::framework::HistType::kTH2F, "hTruePhiVsPhi", "True azimuthal angle vs azimuthal angle; #varphi_{True}; #varphi"},
+   {kNoMcParticle, o2::framework::HistType::kTH2F, "hNoMcParticle", "Wrongly reconstructed particles; p_{T} (GeV/#it{c}); cos(#alpha)"},
+   {kPrimary, o2::framework::HistType::kTH2F, "hPrimary", "Primary particles; p_{T} (GeV/#it{c}); cos(#alpha)"},
+   {kFromWrongCollision, o2::framework::HistType::kTH2F, "hFromWrongCollision", "Particles associated to wrong collision; p_{T} (GeV/#it{c}); cos(#alpha)"},
+   {kFromMaterial, o2::framework::HistType::kTH2F, "hFromMaterial", "Particles from material; p_{T} (GeV/#it{c}); cos(#alpha)"},
+   {kMissidentified, o2::framework::HistType::kTH2F, "hMissidentified", "Missidentified particles (fake/wrong PDG code); p_{T} (GeV/#it{c}); cos(#alpha)"},
+   {kSecondary1, o2::framework::HistType::kTH2F, "hFromSecondary1", "Particles from secondary decay; p_{T} (GeV/#it{c}); cos(#alpha)"},
+   {kSecondary2, o2::framework::HistType::kTH2F, "hFromSecondary2", "Particles from secondary decay; p_{T} (GeV/#it{c}); cos(#alpha)"},
+   {kSecondary3, o2::framework::HistType::kTH2F, "hFromSecondary3", "Particles from secondary decay; p_{T} (GeV/#it{c}); cos(#alpha)"},
+   {kSecondaryOther, o2::framework::HistType::kTH2F, "hFromSecondaryOther", "Particles from every other secondary decay; p_{T} (GeV/#it{c}); cos(#alpha)"}},
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define V0_HIST_ANALYSIS_MAP(conf) \
-  {kPt, {conf.pt}},                \
-    {kEta, {conf.eta}},            \
-    {kPhi, {conf.phi}},            \
-    {kMass, {conf.mass}},          \
-    {kSign, {conf.sign}},
+  {kPt, {(conf).pt}},              \
+    {kEta, {(conf).eta}},          \
+    {kPhi, {(conf).phi}},          \
+    {kMass, {(conf).mass}},        \
+    {kSign, {(conf).sign}},        \
+    {kPtVsMass, {(conf).pt, (conf).mass}},
 
-#define V0_HIST_MC_MAP(conf)               \
-  {kTruePtVsPt, {conf.pt, conf.pt}},       \
-    {kTrueEtaVsEta, {conf.eta, conf.eta}}, \
-    {kTruePhiVsPhi, {conf.phi, conf.phi}}, \
-    {kPdg, {conf.pdgCodes}},               \
-    {kPdgMother, {conf.pdgCodes}},         \
-    {kPdgPartonicMother, {conf.pdgCodes}},
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define V0_HIST_MC_MAP(conf)                   \
+  {kTruePtVsPt, {(conf).pt, (conf).pt}},       \
+    {kTrueEtaVsEta, {(conf).eta, (conf).eta}}, \
+    {kTruePhiVsPhi, {(conf).phi, (conf).phi}}, \
+    {kPdg, {(conf).pdgCodes}},                 \
+    {kPdgMother, {(conf).pdgCodes}},           \
+    {kPdgPartonicMother, {(conf).pdgCodes}},
 
-#define V0_HIST_QA_MAP(confAnalysis, confQa)                                   \
-  {kCosPa, {confQa.cosPa}},                                                    \
-    {kDecayDauDca, {confQa.dauDcaAtDecay}},                                    \
-    {kDecayVtxX, {confQa.decayVertex}},                                        \
-    {kDecayVtxY, {confQa.decayVertex}},                                        \
-    {kDecayVtxZ, {confQa.decayVertex}},                                        \
-    {kDecayVtx, {confQa.decayVertex}},                                         \
-    {kTransRadius, {confQa.transRadius}},                                      \
-    {kPtVsEta, {confAnalysis.pt, confAnalysis.eta}},                           \
-    {kPtVsPhi, {confAnalysis.pt, confAnalysis.phi}},                           \
-    {kPhiVsEta, {confAnalysis.phi, confAnalysis.eta}},                         \
-    {kPtVsCosPa, {confAnalysis.pt, confQa.cosPa}},                             \
-    {kMassLambda, {confQa.massLambda}},                                        \
-    {kMassAntiLambda, {confQa.massAntiLambda}},                                \
-    {kMassK0short, {confQa.massK0short}},                                      \
-    {kPtVsLambdaMass, {confAnalysis.pt, confQa.massLambda}},                   \
-    {kPtVsAntiLambdaMass, {confAnalysis.pt, confQa.massAntiLambda}},           \
-    {kPtVsK0shortMass, {confAnalysis.pt, confQa.massK0short}},                 \
-    {kLambdaMassVsAntiLambdaMass, {confQa.massLambda, confQa.massAntiLambda}}, \
-    {kK0shortMassVsLambdaMass, {confQa.massK0short, confQa.massLambda}},       \
-    {kK0shortMassVsAntiLambdaMass, {confQa.massK0short, confQa.massAntiLambda}},
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define V0_HIST_QA_MAP(confAnalysis, confQa)                                       \
+  {kCosPa, {(confQa).cosPa}},                                                      \
+    {kDecayDauDca, {(confQa).dauDcaAtDecay}},                                      \
+    {kDecayVtxX, {(confQa).decayVertex}},                                          \
+    {kDecayVtxY, {(confQa).decayVertex}},                                          \
+    {kDecayVtxZ, {(confQa).decayVertex}},                                          \
+    {kDecayVtx, {(confQa).decayVertex}},                                           \
+    {kTransRadius, {(confQa).transRadius}},                                        \
+    {kPtVsEta, {(confAnalysis).pt, (confAnalysis).eta}},                           \
+    {kPtVsPhi, {(confAnalysis).pt, (confAnalysis).phi}},                           \
+    {kPhiVsEta, {(confAnalysis).phi, (confAnalysis).eta}},                         \
+    {kPtVsCosPa, {(confAnalysis).pt, (confQa).cosPa}},                             \
+    {kMassLambda, {(confQa).massLambda}},                                          \
+    {kMassAntiLambda, {(confQa).massAntiLambda}},                                  \
+    {kMassK0short, {(confQa).massK0short}},                                        \
+    {kPtVsLambdaMass, {(confAnalysis).pt, (confQa).massLambda}},                   \
+    {kPtVsAntiLambdaMass, {(confAnalysis).pt, (confQa).massAntiLambda}},           \
+    {kPtVsK0shortMass, {(confAnalysis).pt, (confQa).massK0short}},                 \
+    {kLambdaMassVsAntiLambdaMass, {(confQa).massLambda, (confQa).massAntiLambda}}, \
+    {kK0shortMassVsLambdaMass, {(confQa).massK0short, (confQa).massLambda}},       \
+    {kK0shortMassVsAntiLambdaMass, {(confQa).massK0short, (confQa).massAntiLambda}},
 
-#define V0_HIST_MC_QA_MAP(confAnalysis, confQa)             \
-  {kNoMcParticle, {confAnalysis.pt, confQa.cosPa}},         \
-    {kPrimary, {confAnalysis.pt, confQa.cosPa}},            \
-    {kFromWrongCollision, {confAnalysis.pt, confQa.cosPa}}, \
-    {kFromMaterial, {confAnalysis.pt, confQa.cosPa}},       \
-    {kMissidentified, {confAnalysis.pt, confQa.cosPa}},     \
-    {kSecondary1, {confAnalysis.pt, confQa.cosPa}},         \
-    {kSecondary2, {confAnalysis.pt, confQa.cosPa}},         \
-    {kSecondary3, {confAnalysis.pt, confQa.cosPa}},         \
-    {kSecondaryOther, {confAnalysis.pt, confQa.cosPa}},
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define V0_HIST_MC_QA_MAP(confAnalysis, confQa)                 \
+  {kNoMcParticle, {(confAnalysis).pt, (confQa).cosPa}},         \
+    {kPrimary, {(confAnalysis).pt, (confQa).cosPa}},            \
+    {kFromWrongCollision, {(confAnalysis).pt, (confQa).cosPa}}, \
+    {kFromMaterial, {(confAnalysis).pt, (confQa).cosPa}},       \
+    {kMissidentified, {(confAnalysis).pt, (confQa).cosPa}},     \
+    {kSecondary1, {(confAnalysis).pt, (confQa).cosPa}},         \
+    {kSecondary2, {(confAnalysis).pt, (confQa).cosPa}},         \
+    {kSecondary3, {(confAnalysis).pt, (confQa).cosPa}},         \
+    {kSecondaryOther, {(confAnalysis).pt, (confQa).cosPa}},
 
 template <typename T>
 auto makeV0HistSpecMap(const T& confBinningAnalysis)
 {
-  return std::map<V0Hist, std::vector<framework::AxisSpec>>{
+  return std::map<V0Hist, std::vector<o2::framework::AxisSpec>>{
     V0_HIST_ANALYSIS_MAP(confBinningAnalysis)};
 }
 
 template <typename T>
 auto makeV0McHistSpecMap(const T& confBinningAnalysis)
 {
-  return std::map<V0Hist, std::vector<framework::AxisSpec>>{
+  return std::map<V0Hist, std::vector<o2::framework::AxisSpec>>{
     V0_HIST_ANALYSIS_MAP(confBinningAnalysis)
       V0_HIST_MC_MAP(confBinningAnalysis)};
 }
 
 template <typename T1, typename T2>
-std::map<V0Hist, std::vector<framework::AxisSpec>> makeV0QaHistSpecMap(T1 const& confBinningAnalysis, T2 const& confBinningQa)
+std::map<V0Hist, std::vector<o2::framework::AxisSpec>> makeV0QaHistSpecMap(T1 const& confBinningAnalysis, T2 const& confBinningQa)
 {
-  return std::map<V0Hist, std::vector<framework::AxisSpec>>{
+  return std::map<V0Hist, std::vector<o2::framework::AxisSpec>>{
     V0_HIST_ANALYSIS_MAP(confBinningAnalysis)
       V0_HIST_QA_MAP(confBinningAnalysis, confBinningQa)};
 }
 
 template <typename T1, typename T2>
-std::map<V0Hist, std::vector<framework::AxisSpec>> makeV0McQaHistSpecMap(T1 const& confBinningAnalysis, T2 const& confBinningQa)
+std::map<V0Hist, std::vector<o2::framework::AxisSpec>> makeV0McQaHistSpecMap(T1 const& confBinningAnalysis, T2 const& confBinningQa)
 {
-  return std::map<V0Hist, std::vector<framework::AxisSpec>>{
+  return std::map<V0Hist, std::vector<o2::framework::AxisSpec>>{
     V0_HIST_ANALYSIS_MAP(confBinningAnalysis)
       V0_HIST_QA_MAP(confBinningAnalysis, confBinningQa)
         V0_HIST_MC_MAP(confBinningAnalysis)
@@ -276,16 +292,16 @@ constexpr char PrefixK0short2[] = "K0short2/";
 
 constexpr char PrefixLambdaCascade[] = "LambdaCascadeQa/";
 
-constexpr std::string_view AnalysisDir = "Kinematics/";
+constexpr std::string_view AnalysisDir = "Analysis/";
 constexpr std::string_view QaDir = "QA/";
 constexpr std::string_view McDir = "MC/";
 
 /// \class FemtoDreamEventHisto
 /// \brief Class for histogramming event properties
 // template <femtomodes::Mode mode>
-template <const char* v0Prefix,
-          const char* posDauPrefix,
-          const char* negDauPrefix,
+template <auto& v0Prefix,
+          auto& posDauPrefix,
+          auto& negDauPrefix,
           modes::V0 v0>
 class V0HistManager
 {
@@ -329,7 +345,7 @@ class V0HistManager
     mPosDauManager.template init<mode>(registry, PosDauSpecs, absCharge, signPlus, posDauPdgCodeAbs);
     mNegDauManager.template init<mode>(registry, NegDauSpecs, absCharge, signMinus, negDauPdgCodeAbs);
 
-    if constexpr (modes::isFlagSet(mode, modes::Mode::kAnalysis)) {
+    if constexpr (modes::isFlagSet(mode, modes::Mode::kReco)) {
       this->initAnalysis(V0Specs);
     }
     if constexpr (modes::isFlagSet(mode, modes::Mode::kMc)) {
@@ -377,7 +393,7 @@ class V0HistManager
     mPosDauManager.template init<mode>(registry, PosDauSpecs, absCharge, signPlus, posDauPdgCode, ConfPosDauBinningQa);
     mNegDauManager.template init<mode>(registry, NegDauSpecs, absCharge, signMinus, negDauPdgCode, ConfNegDauBinningQa);
 
-    if constexpr (modes::isFlagSet(mode, modes::Mode::kAnalysis)) {
+    if constexpr (modes::isFlagSet(mode, modes::Mode::kReco)) {
       this->initAnalysis(V0Specs);
     }
     if constexpr (modes::isFlagSet(mode, modes::Mode::kQa)) {
@@ -396,7 +412,7 @@ class V0HistManager
     auto negDaughter = tracks.rawIteratorAt(v0candidate.negDauId() - tracks.offset());
     mNegDauManager.template fill<mode>(negDaughter, tracks);
 
-    if constexpr (modes::isFlagSet(mode, modes::Mode::kAnalysis)) {
+    if constexpr (modes::isFlagSet(mode, modes::Mode::kReco)) {
       this->fillAnalysis(v0candidate);
     }
     if constexpr (modes::isFlagSet(mode, modes::Mode::kQa)) {
@@ -411,7 +427,7 @@ class V0HistManager
     mPosDauManager.template fill<mode>(posDaughter, tracks, mcParticles, mcMothers, mcPartonicMothers);
     auto negDaughter = tracks.rawIteratorAt(v0candidate.negDauId() - tracks.offset());
     mNegDauManager.template fill<mode>(negDaughter, tracks, mcParticles, mcMothers, mcPartonicMothers);
-    if constexpr (modes::isFlagSet(mode, modes::Mode::kAnalysis)) {
+    if constexpr (modes::isFlagSet(mode, modes::Mode::kReco)) {
       this->fillAnalysis(v0candidate);
     }
     if constexpr (modes::isFlagSet(mode, modes::Mode::kQa)) {
@@ -446,6 +462,7 @@ class V0HistManager
     mHistogramRegistry->add(analysisDir + getHistNameV2(kPhi, HistTable), getHistDesc(kPhi, HistTable), getHistType(kPhi, HistTable), {V0Specs.at(kPhi)});
     mHistogramRegistry->add(analysisDir + getHistNameV2(kMass, HistTable), getHistDesc(kMass, HistTable), getHistType(kMass, HistTable), {V0Specs.at(kMass)});
     mHistogramRegistry->add(analysisDir + getHistNameV2(kSign, HistTable), getHistDesc(kSign, HistTable), getHistType(kSign, HistTable), {V0Specs.at(kSign)});
+    mHistogramRegistry->add(analysisDir + getHistNameV2(kPtVsMass, HistTable), getHistDesc(kPtVsMass, HistTable), getHistType(kPtVsMass, HistTable), {V0Specs.at(kPtVsMass)});
   }
 
   void initQa(std::map<V0Hist, std::vector<o2::framework::AxisSpec>> const& V0Specs)
@@ -486,7 +503,7 @@ class V0HistManager
     mHistogramRegistry->add(mcDir + getHistNameV2(kTruePhiVsPhi, HistTable), getHistDesc(kTruePhiVsPhi, HistTable), getHistType(kTruePhiVsPhi, HistTable), {V0Specs.at(kTruePhiVsPhi)});
 
     // mc origin can be configured here
-    const framework::AxisSpec axisOrigin = {static_cast<int>(modes::McOrigin::kMcOriginLast), -0.5, static_cast<double>(modes::McOrigin::kMcOriginLast) - 0.5};
+    const o2::framework::AxisSpec axisOrigin = {static_cast<int>(modes::McOrigin::kMcOriginLast), -0.5, static_cast<double>(modes::McOrigin::kMcOriginLast) - 0.5};
     mHistogramRegistry->add(mcDir + getHistNameV2(kOrigin, HistTable), getHistDesc(kOrigin, HistTable), getHistType(kOrigin, HistTable), {axisOrigin});
     mHistogramRegistry->get<TH1>(HIST(v0Prefix) + HIST(McDir) + HIST(histmanager::getHistName(kOrigin, HistTable)))->GetXaxis()->SetBinLabel(1 + static_cast<int>(modes::McOrigin::kNoMcParticle), modes::mcOriginToString(modes::McOrigin::kNoMcParticle));
     mHistogramRegistry->get<TH1>(HIST(v0Prefix) + HIST(McDir) + HIST(histmanager::getHistName(kOrigin, HistTable)))->GetXaxis()->SetBinLabel(1 + static_cast<int>(modes::McOrigin::kFromWrongCollision), modes::mcOriginToString(modes::McOrigin::kFromWrongCollision));
@@ -526,6 +543,7 @@ class V0HistManager
     mHistogramRegistry->fill(HIST(v0Prefix) + HIST(AnalysisDir) + HIST(getHistName(kEta, HistTable)), v0candidate.eta());
     mHistogramRegistry->fill(HIST(v0Prefix) + HIST(AnalysisDir) + HIST(getHistName(kPhi, HistTable)), v0candidate.phi());
     mHistogramRegistry->fill(HIST(v0Prefix) + HIST(AnalysisDir) + HIST(getHistName(kMass, HistTable)), v0candidate.mass());
+    mHistogramRegistry->fill(HIST(v0Prefix) + HIST(AnalysisDir) + HIST(getHistName(kPtVsMass, HistTable)), v0candidate.pt(), v0candidate.mass());
 
     if constexpr (modes::isEqual(v0, modes::V0::kLambda) || modes::isEqual(v0, modes::V0::kAntiLambda)) {
       mHistogramRegistry->fill(HIST(v0Prefix) + HIST(AnalysisDir) + HIST(getHistName(kSign, HistTable)), v0candidate.sign());
@@ -546,43 +564,42 @@ class V0HistManager
     mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kDecayVtx, HistTable)), v0candidate.decayVtx());
     mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kTransRadius, HistTable)), v0candidate.transRadius());
 
+    float massLambda = 0;
+    float massAntiLambda = 0;
+    float massK0short = 0;
+
+    if constexpr (modes::isEqual(v0, modes::V0::kLambda) || modes::isEqual(v0, modes::V0::kAntiLambda)) {
+      massK0short = v0candidate.massK0short();
+      if (v0candidate.sign() > 0) {
+        massLambda = v0candidate.mass();
+        massAntiLambda = v0candidate.massAnti();
+      } else {
+        massLambda = v0candidate.massAnti();
+        massAntiLambda = v0candidate.mass();
+      }
+    }
+    if constexpr (modes::isEqual(v0, modes::V0::kK0short)) {
+      massK0short = v0candidate.mass();
+      massLambda = v0candidate.massLambda();
+      massAntiLambda = v0candidate.massAntiLambda();
+    }
+
+    mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kMassLambda, HistTable)), massLambda);
+    mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kMassAntiLambda, HistTable)), massAntiLambda);
+    mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kMassK0short, HistTable)), massK0short);
+
     if (mPlot2d) {
       mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsEta, HistTable)), v0candidate.pt(), v0candidate.eta());
       mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsPhi, HistTable)), v0candidate.pt(), v0candidate.phi());
       mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPhiVsEta, HistTable)), v0candidate.phi(), v0candidate.eta());
       mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsCosPa, HistTable)), v0candidate.pt(), v0candidate.cosPa());
 
-      if constexpr (modes::isEqual(v0, modes::V0::kLambda) || modes::isEqual(v0, modes::V0::kAntiLambda)) {
-        float massLambda, massAntiLambda;
-        if (v0candidate.sign() > 0) {
-          massLambda = v0candidate.mass();
-          massAntiLambda = v0candidate.massAnti();
-        } else {
-          massLambda = v0candidate.massAnti();
-          massAntiLambda = v0candidate.mass();
-        }
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kMassLambda, HistTable)), massLambda);
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kMassAntiLambda, HistTable)), massAntiLambda);
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kMassK0short, HistTable)), v0candidate.massK0short());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsLambdaMass, HistTable)), v0candidate.pt(), massLambda);
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsAntiLambdaMass, HistTable)), v0candidate.pt(), massAntiLambda);
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsK0shortMass, HistTable)), v0candidate.pt(), v0candidate.massK0short());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kLambdaMassVsAntiLambdaMass, HistTable)), massLambda, massAntiLambda);
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kK0shortMassVsLambdaMass, HistTable)), v0candidate.massK0short(), massLambda);
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kK0shortMassVsAntiLambdaMass, HistTable)), v0candidate.massK0short(), massAntiLambda);
-      }
-
-      if constexpr (modes::isEqual(v0, modes::V0::kK0short)) {
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kMassLambda, HistTable)), v0candidate.massLambda());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kMassAntiLambda, HistTable)), v0candidate.massAntiLambda());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kMassK0short, HistTable)), v0candidate.mass());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsLambdaMass, HistTable)), v0candidate.pt(), v0candidate.massLambda());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsAntiLambdaMass, HistTable)), v0candidate.pt(), v0candidate.massAntiLambda());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsK0shortMass, HistTable)), v0candidate.pt(), v0candidate.mass());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kLambdaMassVsAntiLambdaMass, HistTable)), v0candidate.massLambda(), v0candidate.massAntiLambda());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kK0shortMassVsLambdaMass, HistTable)), v0candidate.mass(), v0candidate.massLambda());
-        mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kK0shortMassVsAntiLambdaMass, HistTable)), v0candidate.mass(), v0candidate.massAntiLambda());
-      }
+      mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsLambdaMass, HistTable)), v0candidate.pt(), massLambda);
+      mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsAntiLambdaMass, HistTable)), v0candidate.pt(), massAntiLambda);
+      mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kPtVsK0shortMass, HistTable)), v0candidate.pt(), massK0short);
+      mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kLambdaMassVsAntiLambdaMass, HistTable)), massLambda, massAntiLambda);
+      mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kK0shortMassVsLambdaMass, HistTable)), massK0short, massLambda);
+      mHistogramRegistry->fill(HIST(v0Prefix) + HIST(QaDir) + HIST(getHistName(kK0shortMassVsAntiLambdaMass, HistTable)), massK0short, massAntiLambda);
     }
   }
 
@@ -619,16 +636,16 @@ class V0HistManager
     mHistogramRegistry->fill(HIST(v0Prefix) + HIST(McDir) + HIST(getHistName(kPdg, HistTable)), mcParticle.pdgCode());
 
     // get mother
-    if (v0Candidate.has_fMcMother()) {
-      auto mother = v0Candidate.template fMcMother_as<T3>();
+    if (mcParticle.has_fMcMother()) {
+      auto mother = mcParticle.template fMcMother_as<T3>();
       mHistogramRegistry->fill(HIST(v0Prefix) + HIST(McDir) + HIST(getHistName(kPdgMother, HistTable)), mother.pdgCode());
     } else {
       mHistogramRegistry->fill(HIST(v0Prefix) + HIST(McDir) + HIST(getHistName(kPdgMother, HistTable)), 0);
     }
 
     // get partonic mother
-    if (v0Candidate.has_fMcPartMoth()) {
-      auto partonicMother = v0Candidate.template fMcPartMoth_as<T4>();
+    if (mcParticle.has_fMcPartMoth()) {
+      auto partonicMother = mcParticle.template fMcPartMoth_as<T4>();
       mHistogramRegistry->fill(HIST(v0Prefix) + HIST(McDir) + HIST(getHistName(kPdgPartonicMother, HistTable)), partonicMother.pdgCode());
     } else {
       mHistogramRegistry->fill(HIST(v0Prefix) + HIST(McDir) + HIST(getHistName(kPdgPartonicMother, HistTable)), 0);
@@ -653,8 +670,8 @@ class V0HistManager
               mHistogramRegistry->fill(HIST(v0Prefix) + HIST(McDir) + HIST(getHistName(kFromMaterial, HistTable)), v0Candidate.pt(), v0Candidate.cosPa());
               break;
             case modes::McOrigin::kFromSecondaryDecay:
-              if (v0Candidate.has_fMcMother()) {
-                auto mother = v0Candidate.template fMcMother_as<T3>();
+              if (mcParticle.has_fMcMother()) {
+                auto mother = mcParticle.template fMcMother_as<T3>();
                 int motherPdgCode = std::abs(mother.pdgCode());
                 // Switch on PDG of the mother
                 if (mPlotNSecondaries >= histmanager::kSecondaryPlotLevel1 && motherPdgCode == mPdgCodesSecondaryMother[0]) {
@@ -687,6 +704,5 @@ class V0HistManager
   trackhistmanager::TrackHistManager<posDauPrefix> mPosDauManager;
   trackhistmanager::TrackHistManager<negDauPrefix> mNegDauManager;
 };
-}; // namespace v0histmanager
-}; // namespace o2::analysis::femto
+}; // namespace o2::analysis::femto::v0histmanager
 #endif // PWGCF_FEMTO_CORE_V0HISTMANAGER_H_

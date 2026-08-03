@@ -166,6 +166,11 @@ o2physics_add_dpl_workflow(lambdajetpolarization
     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::PWGJECore FastJet::FastJet FastJet::Contrib O2Physics::EventFilteringUtils
     COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(lambdajetpolarizationionsderived
+    SOURCES lambdaJetPolarizationIonsDerived.cxx
+    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
+    COMPONENT_NAME Analysis)
+
 o2physics_add_dpl_workflow(lambdaspincorrderived
     SOURCES lambdaspincorrderived.cxx
     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
@@ -176,7 +181,7 @@ o2physics_add_dpl_workflow(strangenessderivedbinnedinfo
     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore O2Physics::AnalysisCCDB O2Physics::EventFilteringUtils
     COMPONENT_NAME Analysis)
 
-o2physics_add_dpl_workflow(lambdatwopartpolarization
+o2physics_add_dpl_workflow(lambda-two-part-polarization
     SOURCES lambdaTwoPartPolarization.cxx
     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
     COMPONENT_NAME Analysis)
