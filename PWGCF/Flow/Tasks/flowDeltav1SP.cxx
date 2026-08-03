@@ -1,4 +1,3 @@
-
 // Copyright 2019-2020 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
@@ -11,9 +10,9 @@
 // or submit itself to any jurisdiction.
 
 /// \file   flowDeltav1SP.cxx
-/// \author Annet Konings (based on flowSP.cxx by Noor Koster)
+/// \author Annet Konings (based on flowSP by Noor Koster)
 /// \since  30/07/2026
-/// \brief  task to evaluate flow with respect to spectator plane with pions, kaons, protons.
+/// \brief  task to evaluate flow with respect to spectator plane with pions, kaons, protons. I have kept the data and MC processing parts for possible future use
 
 #include "PWGCF/DataModel/SPTableZDC.h"
 #include "PWGCF/GenericFramework/Core/GFWWeights.h"
@@ -74,6 +73,7 @@ using namespace o2::aod::rctsel;
 
 #define O2_DEFINE_CONFIGURABLE(NAME, TYPE, DEFAULT, HELP) Configurable<TYPE> NAME{#NAME, DEFAULT, HELP};
 
+// Function to make linear bins for momentum
 inline std::vector<double> make_arange(double start, double stop, double step) {
     const int n = std::round((stop - start) / step) + 1;
     std::vector<double> res(n);
@@ -171,46 +171,31 @@ struct FlowDeltav1SP {
     O2_DEFINE_CONFIGURABLE(cCCDBdir_centrality, std::string, "Users/c/ckoster/flowSP/LHC23_PbPb_pass5/centWeight/Default", "ccdb dir for Centrality corrections");
     O2_DEFINE_CONFIGURABLE(cCCDBdir_meanPt, std::string, "", "ccdb dir for Mean Pt corrections");
 
-  // Configurable axis
-  // ConfigurableAxis axisCentrality{"axisCentrality", {20, 0, 100}, "Centrality bins for vn "};
-  // ConfigurableAxis axisMomentum{"axisMomentum", {20, 0, 10}, "Momentum bins for vn"};
-  //ConfigurableAxis axisNch = {"axisNch", {400, 0, 4000}, "Global N_{ch}"};
-  ConfigurableAxis axisMultpv = {"axisMultpv", {400, 0, 4000}, "N_{ch} (PV)"};
-  // ConfigurableAxis axisEtaVn{"axisEtaVn", {8, -0.8, 0.8}, "Eta bins for vn"};
-
-  // Added myself
-  //ConfigurableAxis axisCent100 = {"axisCent100", {100, 0, 100}, "Centrality (%)"};
-  ConfigurableAxis axisOccupancy = {"axisOccupancy", {400, 0, 10000}, "Occupancy"};
-  //ConfigurableAxis axisVzcfg = {"axisVzcfg", {40, -15, 15}, "v_{z}"};
-
   // Configurables containing vector
     O2_DEFINE_CONFIGURABLE(cUsePredeFinedSigma, bool, true, "Use one of the pre-defines settings for the multiplicity vs. centrality plots");
     O2_DEFINE_CONFIGURABLE(cUsePredeFinedSigmaYear, int, 2023, "Predifine what year you want to use (2023/2024)");
     O2_DEFINE_CONFIGURABLE(cUsePredeFinedSigmaNsigma, int, 2, "Sigma used for cuts (1,2,3)"); //on predefined multiplicity vs centrality plots
   
-  struct : ConfigurableGroup {
-    // p Boundaries for switching from TPC-standalone to TPC+TOF PID
-    O2_DEFINE_CONFIGURABLE(cPBoundaryPi, float, 0.6f, "p boundary for Pions (GeV/c)");
-    O2_DEFINE_CONFIGURABLE(cPBoundaryKa, float, 0.5f, "p boundary for Kaons (GeV/c)");
-    O2_DEFINE_CONFIGURABLE(cPBoundaryPr, float, 0.8f, "p boundary for Protons (GeV/c)");
+    struct : ConfigurableGroup {
+      // p Boundaries for switching from TPC-standalone to TPC+TOF PID
+      O2_DEFINE_CONFIGURABLE(cPBoundaryPi, float, 0.6f, "p boundary for Pions (GeV/c)");
+      O2_DEFINE_CONFIGURABLE(cPBoundaryKa, float, 0.5f, "p boundary for Kaons (GeV/c)");
+      O2_DEFINE_CONFIGURABLE(cPBoundaryPr, float, 0.8f, "p boundary for Protons (GeV/c)");
 
-    // Species-Specific Selection Cuts (TPC & TOF Ellipse Semi-Axes)
-    O2_DEFINE_CONFIGURABLE(cNSigmaTPC_Pi, float, 2.5f, "TPC nSigma selection radius for Pions");
-    O2_DEFINE_CONFIGURABLE(cNSigmaTOF_Pi, float, 2.5f, "TOF nSigma selection radius for Pions");
-    O2_DEFINE_CONFIGURABLE(cNSigmaTPC_Ka, float, 2.5f, "TPC nSigma selection radius for Kaons");
-    O2_DEFINE_CONFIGURABLE(cNSigmaTOF_Ka, float, 2.5f, "TOF nSigma selection radius for Kaons");
-    O2_DEFINE_CONFIGURABLE(cNSigmaTPC_Pr, float, 2.5f, "TPC nSigma selection radius for Protons");
-    O2_DEFINE_CONFIGURABLE(cNSigmaTOF_Pr, float, 2.5f, "TOF nSigma selection radius for Protons");
-
-    //Rectangular cuts for TPC and TOF nSigma (for QA purposes)
-    O2_DEFINE_CONFIGURABLE(cNSigmaTPC_QA, float, 2.5f, "TPC nSigma selection radius for QA");
-    O2_DEFINE_CONFIGURABLE(cNSigmaTOF_QA, float, 2.5f, "TOF nSigma selection radius for QA");
-
+      // Species-specific selection cuts (TPC & TOF)
+      O2_DEFINE_CONFIGURABLE(cNSigmaTPC_Pi, float, 2.5f, "TPC nSigma selection radius for Pions");
+      O2_DEFINE_CONFIGURABLE(cNSigmaTOF_Pi, float, 2.5f, "TOF nSigma selection radius for Pions");
+      O2_DEFINE_CONFIGURABLE(cNSigmaTPC_Ka, float, 2.5f, "TPC nSigma selection radius for Kaons");
+      O2_DEFINE_CONFIGURABLE(cNSigmaTOF_Ka, float, 2.5f, "TOF nSigma selection radius for Kaons");
+      O2_DEFINE_CONFIGURABLE(cNSigmaTPC_Pr, float, 2.5f, "TPC nSigma selection radius for Protons");
+      O2_DEFINE_CONFIGURABLE(cNSigmaTOF_Pr, float, 2.5f, "TOF nSigma selection radius for Protons");
     } pid; 
+
     Configurable<std::vector<double>> cEvSelsMultPv{"cEvSelsMultPv", std::vector<double>{2223.49, -75.1444, 0.963572, -0.00570399, 1.34877e-05, 3790.99, -137.064, 2.13044, -0.017122, 5.82834e-05}, "Multiplicity cuts (PV) first 5 parameters cutLOW last 5 cutHIGH (Default is +-2sigma pass5) "};
     Configurable<std::vector<double>> cEvSelsMult{"cEvSelsMult", std::vector<double>{1301.56, -41.4615, 0.478224, -0.00239449, 4.46966e-06, 2967.6, -102.927, 1.47488, -0.0106534, 3.28622e-05}, "Multiplicity cuts (Global) first 5 parameters cutLOW last 5 cutHIGH (Default is +-2sigma pass5) "};
     Configurable<std::vector<double>> cPtBinning{"cPtBinning", std::vector<double>{0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.2, 2.4, 2.6, 2.8, 3, 3.5, 4, 5, 6, 8, 10}, "pT binning for vn"};
     Configurable<std::vector<double>> cPBinning{"cPBinning", make_arange(0.2, 5.0, 0.1),"Linear bin edges for TOF and TPC momentum plots"};
+  
   } cfg;
 
   RCTFlagsChecker rctChecker;
@@ -219,7 +204,7 @@ struct FlowDeltav1SP {
   Filter trackFilter = nabs(aod::track::eta) < cfg.cTrackSelsEta && aod::track::pt > cfg.cTrackSelsPtmin&& aod::track::pt < cfg.cTrackSelsPtmax && ((requireGlobalTrackInFilter()) || (aod::track::isGlobalTrackSDD == (uint8_t)true) || cfg.cIsMCReco) && nabs(aod::track::dcaXY) < cfg.cTrackSelsDCAxy&& nabs(aod::track::dcaZ) < cfg.cTrackSelsDCAz;
   Filter trackFilterMC = nabs(aod::mcparticle::eta) < cfg.cTrackSelsEta && aod::mcparticle::pt > cfg.cTrackSelsPtmin&& aod::mcparticle::pt < cfg.cTrackSelsPtmax;
   using GeneralCollisions = soa::Join<aod::Collisions, aod::EvSels, aod::Mults, aod::CentFT0Cs, aod::CentFT0CVariant1s, aod::CentFT0Ms, aod::CentFV0As, aod::CentNGlobals>;
-  using UnfilteredTracksPID = soa::Join<aod::Tracks, aod::TracksExtra, aod::TrackSelection, aod::TracksDCA, aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr, aod::pidTPCFullEl, aod::pidTOFbeta, aod::pidTOFFullPi, aod::pidTOFFullKa, aod::pidTOFFullPr, aod::pidTOFFullEl>;
+  using UnfilteredTracksPID = soa::Join<aod::Tracks, aod::TracksExtra, aod::TrackSelection, aod::TracksDCA, aod::pidTPCFullPi, aod::pidTPCFullKa, aod::pidTPCFullPr, aod::pidTOFbeta, aod::pidTOFFullPi, aod::pidTOFFullKa, aod::pidTOFFullPr>;
   using UnfilteredTracks = soa::Join<aod::Tracks, aod::TracksExtra, aod::TrackSelection, aod::TracksDCA>;
 
   using UsedTracks = soa::Filtered<UnfilteredTracks>;
@@ -396,7 +381,6 @@ struct FlowDeltav1SP {
     kBeforePID,
     kAfterTOF,
     kAfterTPC_TOF,
-    //kAfterExtra,
     nStageTypes
   };
 
@@ -404,7 +388,6 @@ struct FlowDeltav1SP {
   static constexpr std::string_view Species[] = {"", "pion/", "kaon/", "proton/"};
   static constexpr std::string_view Time[] = {"before/", "after/"};
   static constexpr std::string_view Stage[] = {"BeforePID/", "AfterTOF/", "AfterTPC_TOF/"};
-  //static constexpr std::string_view Stage[] = {"BeforePID/", "AfterTOF/", "AfterTPC_TOF/", "AfterExtra/"};
 
   void init(InitContext const&)
   {
@@ -433,9 +416,11 @@ struct FlowDeltav1SP {
     AxisSpec axisV0a = {70, 0, 200000, "N_{ch} (V0A)"};
     AxisSpec axisShCl = {40, 0, 1, "Fraction shared cl. TPC"};
     AxisSpec axisCl = {80, 0, 160, "Number of cl. TPC"};
-    AxisSpec axisNsigma = {100, -10, 10, "Nsigma for TPC and TOF"};
-    AxisSpec axisdEdx = {300, 0, 300, "dEdx for PID"};
-    AxisSpec axisBeta = {150, 0, 1.5, "Beta for PID"};
+    AxisSpec axisNsigma = {400, -10, 10, "Nsigma for TPC and TOF"};
+    AxisSpec axisdEdx = {500, 0, 300, "dEdx for PID"};
+    AxisSpec axisBeta = {500, 0, 1.5, "Beta for PID"};
+    AxisSpec axisdEdxdiff = {400, -50, 50, "dE/dx - <dE/dx> for PID QA"};
+    AxisSpec axisTimeDiff{400, -2000.0, 2000.0, "t_{TOF} - <t_{TOF}> (ps) for PID QA"};
     AxisSpec axisCharge = {3, 0, 3, "Charge: 0 = inclusive, 1 = positive, 2 = negative"};
     AxisSpec axisPx = {100, -0.05, 0.05, "p_{x} (GeV/c)"};
     AxisSpec axisNch = {400, 0, 4000, "Global N_{ch}"};
@@ -563,92 +548,71 @@ struct FlowDeltav1SP {
           histos.addClone("incl/QA/after/", "incl/QA/before/");
       }
 
-      if (cfg.cFillPIDQA && doprocessDataPID) {
+      if (doprocessDataPID) {
         histos.add<TH2>("hPIDcounts", "", kTH2D, {{{4, 0, 4}, axisPBeta}});
         histos.get<TH2>(HIST("hPIDcounts"))->GetXaxis()->SetBinLabel(1, "UFO");
         histos.get<TH2>(HIST("hPIDcounts"))->GetXaxis()->SetBinLabel(2, "Pion");
         histos.get<TH2>(HIST("hPIDcounts"))->GetXaxis()->SetBinLabel(3, "Kaon");
         histos.get<TH2>(HIST("hPIDcounts"))->GetXaxis()->SetBinLabel(4, "Proton");
 
-        histos.add("incl/QA/after/hdEdxTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisdEdx}});
-        histos.add("incl/QA/after/hBetaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisBeta}});
-        histos.add("incl/QA/before/hdEdxTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisdEdx}});
-        histos.add("incl/QA/before/hBetaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisBeta}});
+        if (cfg.cFillPIDQA) {
 
-        histos.add("incl/pion/QA/after/hNsigmaTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisNsigma}});
-        histos.add("incl/pion/QA/after/hNsigmaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisNsigma}});
+          histos.add("incl/QA/after/hdEdxTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisdEdx}});
+          histos.add("incl/QA/after/hBetaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisBeta}});
+          histos.add("incl/QA/before/hdEdxTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisdEdx}});
+          histos.add("incl/QA/before/hBetaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisBeta}});
 
-        /*
-        if (cfg.cTrackSelDoTrackQAvsCent) {
-          histos.add<TH3>("incl/pion/QA/after/hPt_Eta", "", kTH3D, {axisPt, axisEta, axisCent});
-          histos.add<TH3>("incl/pion/QA/after/hPt_Eta_uncorrected", "", kTH3D, {axisPt, axisEta, axisCent});
-          histos.add<TH3>("incl/pion/QA/after/hPhi_Eta", "", kTH3D, {axisPhi, axisEta, axisCent});
-          histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_uncorrected", "", kTH3D, {axisPhi, axisEta, axisCent});
-        } else {
-          histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_Pt", "", kTH3D, {axisPhi, axisEta, axisPt});
-          histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_Pt_corrected", "", kTH3D, {axisPhi, axisEta, axisPt});
+          histos.add("incl/pion/QA/after/hNsigmaTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisNsigma}});
+          histos.add("incl/pion/QA/after/hNsigmaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisNsigma}});
+
+          
+          if (cfg.cTrackSelDoTrackQAvsCent) {
+            histos.add<TH3>("incl/pion/QA/after/hPt_Eta", "", kTH3D, {axisPt, axisEta, axisCent});
+            histos.add<TH3>("incl/pion/QA/after/hPt_Eta_uncorrected", "", kTH3D, {axisPt, axisEta, axisCent});
+            histos.add<TH3>("incl/pion/QA/after/hPhi_Eta", "", kTH3D, {axisPhi, axisEta, axisCent});
+            histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_uncorrected", "", kTH3D, {axisPhi, axisEta, axisCent});
+          } else {
+            histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_Pt", "", kTH3D, {axisPhi, axisEta, axisPt});
+            histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_Pt_corrected", "", kTH3D, {axisPhi, axisEta, axisPt});
+          }
+          
+          histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_vz", "", kTH3D, {axisPhi, axisEta, axisVz});
+          histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_vz_corrected", "", kTH3D, {axisPhi, axisEta, axisVz});
+          histos.add<TH2>("incl/pion/QA/after/hDCAxy_pt", "", kTH2D, {axisPt, axisDCAxy});
+          histos.add<TH2>("incl/pion/QA/after/hDCAz_pt", "", kTH2D, {axisPt, axisDCAz});
+          histos.add("incl/pion/QA/after/hSharedClusters_pt", "", {HistType::kTH2D, {axisPt, axisShCl}});
+          histos.add("incl/pion/QA/after/hCrossedRows_pt", "", {HistType::kTH2D, {axisPt, axisCl}});
+          histos.add("incl/pion/QA/after/hCrossedRows_vs_SharedClusters", "", {HistType::kTH2D, {axisCl, axisShCl}});
+          histos.add("incl/pion/QA/after/hMeanPtEta", "", {HistType::kTProfile2D, {axisEta, axisCent}});
+
+          if (cfg.cFillQABefore) {
+            histos.addClone("incl/pion/QA/after/", "incl/pion/QA/before/");
+          }
+        
+        }  
+
+        if (cfg.cFillPIDTPCTOFCutsQA) {
+          std::vector<std::string> stages = {"BeforePID", "AfterTOF", "AfterTPC_TOF"};
+          
+          for (const auto& st : stages) {
+            std::string base = "incl/pion/QA/" + st + "/";
+
+            // 2D QA Histograms
+            histos.add(base + "hNsigmaTPC_p", "", HistType::kTH2D, {axisPdEdx, axisNsigma});
+            histos.add(base + "hNsigmaTOF_p", "", HistType::kTH2D, {axisPBeta, axisNsigma});
+            histos.add(base + "hNsigmaComb_p", "", HistType::kTH2D, {axisPBeta, axisNsigma});
+            histos.add(base + "hdEdxTPC_p", "", HistType::kTH2D, {axisPdEdx, axisdEdx});
+            histos.add(base + "hBetaTOF_p", "", HistType::kTH2D, {axisPBeta, axisBeta});
+
+            // 3D QA Histograms
+            histos.add(base + "hdEdxTPC_BetaTOF_p", "", HistType::kTH3D, {axisdEdxdiff, axisTimeDiff, axisPBeta});
+            histos.add(base + "hNsigmaTPC_NsigmaTOF_p", "", HistType::kTH3D, {axisNsigma, axisNsigma, axisPBeta});
+            histos.add(base + "hdEdxTPC_BetaTOF_pt", "", HistType::kTH3D, {axisdEdxdiff, axisTimeDiff, axisPt});
+            histos.add(base + "hNsigmaTPC_NsigmaTOF_pt", "", HistType::kTH3D, {axisNsigma, axisNsigma, axisPt});
+          }
         }
-        histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_vz", "", kTH3D, {axisPhi, axisEta, axisVz});
-        histos.add<TH3>("incl/pion/QA/after/hPhi_Eta_vz_corrected", "", kTH3D, {axisPhi, axisEta, axisVz});
-        histos.add<TH2>("incl/pion/QA/after/hDCAxy_pt", "", kTH2D, {axisPt, axisDCAxy});
-        histos.add<TH2>("incl/pion/QA/after/hDCAz_pt", "", kTH2D, {axisPt, axisDCAz});
-        histos.add("incl/pion/QA/after/hSharedClusters_pt", "", {HistType::kTH2D, {axisPt, axisShCl}});
-        histos.add("incl/pion/QA/after/hCrossedRows_pt", "", {HistType::kTH2D, {axisPt, axisCl}});
-        histos.add("incl/pion/QA/after/hCrossedRows_vs_SharedClusters", "", {HistType::kTH2D, {axisCl, axisShCl}});
-        histos.add("incl/pion/QA/after/hMeanPtEta", "", {HistType::kTProfile2D, {axisEta, axisCent}});
-        */
+        //Kaon and proton and charge dependence done later, after doProcessDataPID
 
-        if (cfg.cFillQABefore) {
-          histos.addClone("incl/pion/QA/after/", "incl/pion/QA/before/");
-        }
-
-        histos.addClone("incl/pion/", "incl/kaon/");
-        histos.addClone("incl/pion/", "incl/proton/");
-
-        //Charge dependence done later, after doProcessDataPID
-
-      }
-
-      if (cfg.cFillPIDTPCTOFCutsQA && doprocessDataPID) {
-        histos.add("incl/pion/QA/BeforePID/hNsigmaTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisNsigma}});
-        histos.add("incl/pion/QA/BeforePID/hNsigmaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisNsigma}});
-        histos.add("incl/pion/QA/BeforePID/hNsigmaComb_p", "", {HistType::kTH2D, {axisPBeta, axisNsigma}});
-        histos.add("incl/pion/QA/BeforePID/hdEdxTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisdEdx}});
-        histos.add("incl/pion/QA/BeforePID/hBetaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisBeta}});
-        histos.add("incl/kaon/QA/BeforePID/hNsigmaTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisNsigma}});
-        histos.add("incl/kaon/QA/BeforePID/hNsigmaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisNsigma}});
-        histos.add("incl/kaon/QA/BeforePID/hNsigmaComb_p", "", {HistType::kTH2D, {axisPBeta, axisNsigma}});
-        histos.add("incl/kaon/QA/BeforePID/hdEdxTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisdEdx}});
-        histos.add("incl/kaon/QA/BeforePID/hBetaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisBeta}});
-        histos.add("incl/proton/QA/BeforePID/hNsigmaTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisNsigma}});
-        histos.add("incl/proton/QA/BeforePID/hNsigmaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisNsigma}});
-        histos.add("incl/proton/QA/BeforePID/hNsigmaComb_p", "", {HistType::kTH2D, {axisPBeta, axisNsigma}});
-        histos.add("incl/proton/QA/BeforePID/hdEdxTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisdEdx}});
-        histos.add("incl/proton/QA/BeforePID/hBetaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisBeta}});
-        histos.add("incl/QA/BeforePID/hdEdxTPC_p", "", {HistType::kTH2D, {axisPdEdx, axisdEdx}});
-        histos.add("incl/QA/BeforePID/hBetaTOF_p", "", {HistType::kTH2D, {axisPBeta, axisBeta}});
-        histos.add("incl/QA/BeforePID/hdEdxTPC_BetaTOF_Pi", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPBeta}});
-        histos.add("incl/QA/BeforePID/hdEdxTPC_BetaTOF_Ka", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPBeta}});
-        histos.add("incl/QA/BeforePID/hdEdxTPC_BetaTOF_Pr", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPBeta}});
-        histos.add("incl/QA/BeforePID/hNsigmaTPC_NsigmaTOF_Pi", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPBeta}});
-        histos.add("incl/QA/BeforePID/hNsigmaTPC_NsigmaTOF_Ka", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPBeta}});
-        histos.add("incl/QA/BeforePID/hNsigmaTPC_NsigmaTOF_Pr", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPBeta}});
-        histos.add("incl/QA/BeforePID/hdEdxTPC_BetaTOF_Pi_pt", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPt}});
-        histos.add("incl/QA/BeforePID/hdEdxTPC_BetaTOF_Ka_pt", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPt}});
-        histos.add("incl/QA/BeforePID/hdEdxTPC_BetaTOF_Pr_pt", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPt}});
-        histos.add("incl/QA/BeforePID/hNsigmaTPC_NsigmaTOF_Pi_pt", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPt}});
-        histos.add("incl/QA/BeforePID/hNsigmaTPC_NsigmaTOF_Ka_pt", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPt}});
-        histos.add("incl/QA/BeforePID/hNsigmaTPC_NsigmaTOF_Pr_pt", "", {HistType::kTH3D, {axisdEdx, axisBeta, axisPt}});
-        histos.addClone("incl/pion/QA/BeforePID/", "incl/pion/QA/AfterTOF/");
-        histos.addClone("incl/pion/QA/BeforePID/", "incl/pion/QA/AfterTPC_TOF/");
-        histos.addClone("incl/kaon/QA/BeforePID/", "incl/kaon/QA/AfterTOF/");
-        histos.addClone("incl/kaon/QA/BeforePID/", "incl/kaon/QA/AfterTPC_TOF/");
-        histos.addClone("incl/proton/QA/BeforePID/", "incl/proton/QA/AfterTOF/");
-        histos.addClone("incl/proton/QA/BeforePID/", "incl/proton/QA/AfterTPC_TOF/");
-        histos.addClone("incl/QA/BeforePID/", "incl/QA/AfterTOF/");
-        histos.addClone("incl/QA/BeforePID/", "incl/QA/AfterTPC_TOF/");
-      
-        //Charge dependence done later, after doProcessDataPID
       }
 
       if (cfg.cFillEventQA) {
@@ -685,7 +649,7 @@ struct FlowDeltav1SP {
           // track properties per centrality and per eta, pt bin
           registry.add<TProfile3D>("incl/vnC", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
           registry.add<TProfile3D>("incl/vnA", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
-          //Added
+          //Added for possible covariance error calculation, to be checked
           registry.add<TProfile3D>("incl/vnAvnC", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
           registry.add<TProfile3D>("incl/vnA_nw", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
           registry.add<TProfile3D>("incl/vnC_nw", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
@@ -748,10 +712,8 @@ struct FlowDeltav1SP {
         if (cfg.cFillGeneralV1Histos) {
           registry.add<TProfile3D>("incl/pion/vnC", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
           registry.add<TProfile3D>("incl/pion/vnA", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
-          //registry.add<TProfile3D>("incl/pion/vnCSetPlane", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
-          //registry.add<TProfile3D>("incl/pion/vnASetPlane", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
 
-          //Added
+          //Added for possible covariance error calculation, to be checked
           registry.add<TProfile3D>("incl/pion/vnAvnC", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
           registry.add<TProfile3D>("incl/pion/vnA_nw", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
           registry.add<TProfile3D>("incl/pion/vnC_nw", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
@@ -759,7 +721,7 @@ struct FlowDeltav1SP {
           if (!doprocessData) {
             registry.add<TProfile3D>("incl/vnC", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
             registry.add<TProfile3D>("incl/vnA", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
-            //Added
+            //Added for possible covariance error calculation, to be checked
             registry.add<TProfile3D>("incl/vnAvnC", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
             registry.add<TProfile3D>("incl/vnA_nw", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
             registry.add<TProfile3D>("incl/vnC_nw", "", kTProfile3D, {axisPt, axisEtaVn, axisCentrality});
@@ -809,6 +771,8 @@ struct FlowDeltav1SP {
         }
         registry.addClone("incl/pion/", "incl/proton/");
         registry.addClone("incl/pion/", "incl/kaon/");
+        histos.addClone("incl/pion/", "incl/proton/");
+        histos.addClone("incl/pion/", "incl/kaon/");
       }
 
       if (cfg.cFillChargeDependence || cfg.cFillChargeDependenceQA) {
@@ -934,7 +898,7 @@ struct FlowDeltav1SP {
       const float nSigmaPrTOF = hasTOF ? track.tofNSigmaPr() : 0.0f;
 
       
-      // Hypthesis tester
+      // Species hypothesis tester
       auto passesSpeciesPID = [&](float nSigmaTPC, float nSigmaTOF, float pBoundary, float NSigmaTPC_Species, float NSigmaTOF_Species) -> bool {
           if (p < pBoundary) {
             // Only require TPC  
@@ -988,64 +952,60 @@ struct FlowDeltav1SP {
 
     float nsigmaTPC = 999.f;
     float nsigmaTOF = 999.f;
+    float dEdxDiff  = 0.f;
+    float betaDiff  = 0.f;
 
+    // Get species-specific variables using
     if constexpr (par == kPions) {
       nsigmaTPC = track.tpcNSigmaPi();
+      dEdxDiff  = track.tpcExpSignalDiffPi();
       if constexpr (framework::has_type_v<aod::pidtof::TOFNSigmaPi, typename TrackObject::all_columns>) { 
         nsigmaTOF = track.tofNSigmaPi();
+        betaDiff  = track.tofExpSignalDiffPi();
       }
     }
     else if constexpr (par == kKaons) {
       nsigmaTPC = track.tpcNSigmaKa();
+      dEdxDiff  = track.tpcExpSignalDiffKa();
       if constexpr (framework::has_type_v<aod::pidtof::TOFNSigmaKa, typename TrackObject::all_columns>) {
         nsigmaTOF = track.tofNSigmaKa();
+        betaDiff  = track.tofExpSignalDiffKa();
       }
     }
     else if constexpr (par == kProtons) {
       nsigmaTPC = track.tpcNSigmaPr();
+      dEdxDiff  = track.tpcExpSignalDiffPr();
       if constexpr (framework::has_type_v<aod::pidtof::TOFNSigmaPr, typename TrackObject::all_columns>) {
         nsigmaTOF = track.tofNSigmaPr();
+        betaDiff  = track.tofExpSignalDiffPr();
       }
     }
 
     // TPC nSigma
     histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTPC_p"), track.tpcInnerParam(), nsigmaTPC);
     
-    // TOF nSigma
+    // TOF nSigma & Combined
     if (track.hasTOF()) {
       histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTOF_p"), track.p(), nsigmaTOF);
       float nsigmaComb = std::hypot(nsigmaTPC, nsigmaTOF);
-      histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaComb_p"), track.p(), nsigmaComb); //still use p here?
+      histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaComb_p"), track.p(), nsigmaComb);
     }
     
-    // Detector response per particle species
+    // Detector response per species (Raw signals)
     histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_p"), track.tpcInnerParam(), track.tpcSignal());
     if (track.hasTOF()) {
       histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hBetaTOF_p"), track.p(), track.beta());
-
     }
-    
-    // Detector response overall
-    histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_p"), track.tpcInnerParam(), track.tpcSignal());
-    if (track.hasTOF()) {
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hBetaTOF_p"), track.p(), track.beta());
-      // Fill dEdx vs beta for PID QA
-      // Not with species
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_BetaTOF_Pi"),  track.tpcExpSignalDiffPi(), track.tofExpSignalDiffPi(), track.p());
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_BetaTOF_Ka"),  track.tpcExpSignalDiffKa(), track.tofExpSignalDiffKa(), track.p());
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_BetaTOF_Pr"),  track.tpcExpSignalDiffPr(), track.tofExpSignalDiffPr(), track.p());
-      //Nsigma:
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTPC_NsigmaTOF_Pi"),  track.tpcNSigmaPi(), track.tofNSigmaPi(), track.p());
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTPC_NsigmaTOF_Ka"),  track.tpcNSigmaKa(), track.tofNSigmaKa(), track.p());
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTPC_NsigmaTOF_Pr"),  track.tpcNSigmaPr(), track.tofNSigmaPr(), track.p());
 
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_BetaTOF_Pi_pt"),  track.tpcExpSignalDiffPi(), track.tofExpSignalDiffPi(), track.pt());
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_BetaTOF_Ka_pt"),  track.tpcExpSignalDiffKa(), track.tofExpSignalDiffKa(), track.pt());
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_BetaTOF_Pr_pt"),  track.tpcExpSignalDiffPr(), track.tofExpSignalDiffPr(), track.pt());
-      //Nsigma:
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTPC_NsigmaTOF_Pi_pt"),  track.tpcNSigmaPi(), track.tofNSigmaPi(), track.pt());
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTPC_NsigmaTOF_Ka_pt"),  track.tpcNSigmaKa(), track.tofNSigmaKa(), track.pt());
-      histos.fill(HIST(Charge[ct]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTPC_NsigmaTOF_Pr_pt"),  track.tpcNSigmaPr(), track.tofNSigmaPr(), track.pt());
+    // 2D Correlation / Difference Histograms
+    if (track.hasTOF()) {
+      // Fill with p on Z-axis
+      histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_BetaTOF_p"), dEdxDiff, betaDiff, track.p());
+      histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTPC_NsigmaTOF_p"), nsigmaTPC, nsigmaTOF, track.p());
+
+      // Fill with pT on Z-axis
+      histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hdEdxTPC_BetaTOF_pt"), dEdxDiff, betaDiff, track.pt());
+      histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Stage[st]) + HIST("hNsigmaTPC_NsigmaTOF_pt"), nsigmaTPC, nsigmaTOF, track.pt());
     }
   }
 
@@ -1323,7 +1283,6 @@ template <typename TCollision>
 
     histos.fill(HIST("hTrackCount"), trackSel_Pt);
 
-    // Edited myself: fabs
     if (std::fabs(track.dcaXY()) > cfg.cTrackSelsDCAxy)
       return false;
 
@@ -1420,7 +1379,6 @@ template <typename TCollision>
   {
     double weight = spm.wacc[ct][pt] * spm.weff[ct][pt] * spm.centWeight;
     float scale = 1.0;
-    float minusQ = -1.0;
     if (track.eta() < 0)
       scale = -1.0;
 
@@ -1432,14 +1390,8 @@ template <typename TCollision>
     const double invMeanPtQQ = 1.0 / spm.meanPtWeight;
 
     if (cfg.cFillGeneralV1Histos) {
-      //registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnAodd"), track.pt(), track.eta(), spm.centrality, scale * (uqA)*invSqrtQQ, weight);
-      //registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnCodd"), track.pt(), track.eta(), spm.centrality, scale * (uqC)*invSqrtQQ, weight);
-      //registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnOdd"), track.pt(), track.eta(), spm.centrality, scale * 0.5 * ((uqA) - (uqC)) * invSqrtQQ, weight);
-      //registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnEven"), track.pt(), track.eta(), spm.centrality, 0.5 * ((uqA) + (uqC)) * invSqrtQQ, weight);
       registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnA"), track.pt(), track.eta(), spm.centrality, (uqA)*invSqrtQQ, weight);
       registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnC"), track.pt(), track.eta(), spm.centrality, (uqC)*invSqrtQQ, weight);
-      //registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnCSetPlane"), track.pt(), track.eta(), spm.centrality, (spm.uy + spm.ux) * invSqrtQQ, weight);
-      //registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnASetPlane"), track.pt(), track.eta(), spm.centrality, (minusQ * spm.ux - spm.uy) * invSqrtQQ, weight);
       registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnAvnC"), track.pt(), track.eta(), spm.centrality, (uqA)*invSqrtQQ*(uqC)*invSqrtQQ, weight);
       registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnA_nw"), track.pt(), track.eta(), spm.centrality, (uqA)*invSqrtQQ);
       registry.fill(HIST(Charge[ct]) + HIST(Species[pt]) + HIST("vnC_nw"), track.pt(), track.eta(), spm.centrality, (uqC)*invSqrtQQ);
@@ -1509,7 +1461,6 @@ template <typename TCollision>
       histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Time[ft]) + HIST("hPhi_Eta_Pt"), track.phi(), track.eta(), track.pt());
       histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Time[ft]) + HIST("hPhi_Eta_Pt_corrected"), track.phi(), track.eta(), track.pt(), weight);
     }
-
     histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Time[ft]) + HIST("hPhi_Eta_vz"), track.phi(), track.eta(), spm.vz);
     histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Time[ft]) + HIST("hPhi_Eta_vz_corrected"), track.phi(), track.eta(), spm.vz, spm.wacc[ct][par]);
     histos.fill(HIST(Charge[ct]) + HIST(Species[par]) + HIST("QA/") + HIST(Time[ft]) + HIST("hDCAxy_pt"), track.pt(), track.dcaXY(), weight);
@@ -1601,18 +1552,18 @@ template <typename TCollision>
   void fillAllQA(TrackObject track)
   {
     fillTrackQA<ft, kInclusive, par>(track);
-    fillPIDQA<ft, kInclusive, par>(track); // <-- Added par here
+    fillPIDQA<ft, kInclusive, par>(track);
 
     if (cfg.cFillChargeDependenceQA) {
       switch (spm.charge) {
         case kPositive: {
           fillTrackQA<ft, kPositive, par>(track);
-          fillPIDQA<ft, kPositive, par>(track); // <-- Added par here
+          fillPIDQA<ft, kPositive, par>(track);
           break;
         }
         case kNegative: {
           fillTrackQA<ft, kNegative, par>(track);
-          fillPIDQA<ft, kNegative, par>(track); // <-- Added par here
+          fillPIDQA<ft, kNegative, par>(track);
           break;
         }
       }
@@ -1942,7 +1893,7 @@ template <typename TCollision>
     }
   }
 
-  PROCESS_SWITCH(FlowDeltav1SP, processData, "Process analysis for non-derived data", true);
+  PROCESS_SWITCH(FlowDeltav1SP, processData, "Process analysis for non-derived data", false);
 
   void processDataPID(ZDCCollisions::iterator const& collision, aod::BCsWithTimestamps const&, UsedTracksPID const& tracks)
   {
@@ -2075,7 +2026,7 @@ template <typename TCollision>
       //const float tpcInnerParam = track.tpcInnerParam();
       const bool hasTOF = track.hasTOF();
 
-      // ------------------- 1D RECTANGULAR CUTS (FOR QA) -------------------
+      // 1D RECTANGULAR CUTS (FOR QA)
       //always require TPC, but only require TOF if p > cPBoundary
       bool passTPCPion = std::abs(track.tpcNSigmaPi()) < cfg.pid.cNSigmaTPC_Pi;
       bool passTPCKaon = std::abs(track.tpcNSigmaKa()) < cfg.pid.cNSigmaTPC_Ka;
@@ -2096,7 +2047,7 @@ template <typename TCollision>
           passTOFProton = hasTOF && (std::abs(track.tofNSigmaPr()) < cfg.pid.cNSigmaTOF_Pr);
       }
 
-      // ------------------- QA HISTOGRAM FILLING -------------------
+      // QA histograms for TPC and TOF cuts
       if (cfg.cFillPIDTPCTOFCutsQA) {
           // Passes TOF standalone
           if (passTOFPion)
@@ -2116,7 +2067,6 @@ template <typename TCollision>
       }
 
       if (cfg.cFillQABefore) {
-        fillAllQA<kBefore, kUnidentified>(track);
         switch (trackPID) {
           case kPions:
             fillAllQA<kBefore, kPions>(track);
@@ -2134,8 +2084,6 @@ template <typename TCollision>
 
       // constrain angle to 0 -> [0,0+2pi]
       auto phi = RecoDecay::constrainAngle(track.phi(), 0);
-
-      fillAllQA<kAfter, kUnidentified>(track);
 
       switch (trackPID) {
         case kPions:
@@ -2163,11 +2111,64 @@ template <typename TCollision>
       spm.vnC = std::cos(cfg.cHarm * (phi - spm.psiC)) / evPlaneRes;
       spm.vnFull = std::cos(cfg.cHarm * (phi - spm.psiFull)) / evPlaneRes;
 
-      // PID-only mode: do not fill the flow histogram family from processDataPID.
+      // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+      fillHistograms<kInclusive, kUnidentified>(track);
+
+      switch (trackPID) {
+        case kPions:
+          fillHistograms<kInclusive, kPions>(track);
+          break;
+        case kKaons:
+          fillHistograms<kInclusive, kKaons>(track);
+          break;
+        case kProtons:
+          fillHistograms<kInclusive, kProtons>(track);
+          break;
+        default: /* do nothing */
+          break;
+      }
+
+      if (cfg.cFillChargeDependence) {
+        switch (spm.charge) {
+          case kPositive: {
+            switch (trackPID) {
+              case kPions:
+                fillHistograms<kPositive, kPions>(track);
+                break;
+              case kKaons:
+                fillHistograms<kPositive, kKaons>(track);
+                break;
+              case kProtons:
+                fillHistograms<kPositive, kProtons>(track);
+                break;
+              default: /* do nothing */
+                break;
+            }
+            break;
+          }
+          case kNegative: {
+            switch (trackPID) {
+              case kPions:
+                fillHistograms<kNegative, kPions>(track);
+                break;
+              case kKaons:
+                fillHistograms<kNegative, kKaons>(track);
+                break;
+              case kProtons:
+                fillHistograms<kNegative, kProtons>(track);
+                break;
+              default: /* do nothing */
+                break;
+            }
+            break;
+          }
+        }
+      }
     } // end of track loop
   }
 
-  PROCESS_SWITCH(FlowDeltav1SP, processDataPID, "Process analysis for non-derived data with PID", false);
+  PROCESS_SWITCH(FlowDeltav1SP, processDataPID, "Process analysis for non-derived data with PID", true);
 
   void processMCReco(CC const& collision, aod::BCsWithTimestamps const&, TCs const& tracks, FilteredTCs const& filteredTracks, aod::McParticles const&)
   {
