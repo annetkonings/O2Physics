@@ -37,9 +37,19 @@ jobs:
       - name: Run tests
         id: linter
         run: |
-          # Diff against the common ancestor of the source (head) branch and the target (base) branch.
-          echo "Diffing ${{ env.BRANCH_HEAD }} against ${{ env.BRANCH_BASE }}."
-          readarray -t files < <(git diff --diff-filter d --name-only origin/${{ env.BRANCH_BASE }}...)
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "Diffing ${{ github.event.before }} against ${{ github.sha }}."
+            if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+              # New branch push: lint files introduced by the pushed commit.
+              readarray -t files < <(git show --diff-filter d --name-only --pretty=format: ${{ github.sha }})
+            else
+              readarray -t files < <(git diff --diff-filter d --name-only ${{ github.event.before }} ${{ github.sha }})
+            fi
+          else
+            # Diff against the common ancestor of the source (head) branch and the target (base) branch.
+            echo "Diffing ${{ env.BRANCH_HEAD }} against ${{ env.BRANCH_BASE }}."
+            readarray -t files < <(git diff --diff-filter d --name-only origin/${{ env.BRANCH_BASE }}...)
+          fi
           if [ ${#files[@]} -eq 0 ]; then
               echo "::notice::No files to lint."
               echo "linter_ran=0" >> "$GITHUB_OUTPUT"
