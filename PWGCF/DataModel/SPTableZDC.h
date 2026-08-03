@@ -18,7 +18,6 @@
 #define PWGCF_DATAMODEL_SPTABLEZDC_H_
 
 #include "Common/Core/RecoDecay.h"
-#include "Common/DataModel/PIDResponse.h"
 #include "Common/DataModel/TrackSelectionTables.h"
 
 #include "Framework/AnalysisDataModel.h"
@@ -40,6 +39,16 @@ DECLARE_SOA_COLUMN(QxC, qxC, float);
 DECLARE_SOA_COLUMN(QyC, qyC, float);
 DECLARE_SOA_COLUMN(IsSelected, isSelected, bool);
 DECLARE_SOA_COLUMN(EventSelectionFlags, eventSelectionFlags, uint16_t);
+DECLARE_SOA_COLUMN(EnergySectorA1, energySectorA1, float);
+DECLARE_SOA_COLUMN(EnergySectorA2, energySectorA2, float);
+DECLARE_SOA_COLUMN(EnergySectorA3, energySectorA3, float);
+DECLARE_SOA_COLUMN(EnergySectorA4, energySectorA4, float);
+DECLARE_SOA_COLUMN(EnergyCommonA, energyCommonA, float);
+DECLARE_SOA_COLUMN(EnergySectorC1, energySectorC1, float);
+DECLARE_SOA_COLUMN(EnergySectorC2, energySectorC2, float);
+DECLARE_SOA_COLUMN(EnergySectorC3, energySectorC3, float);
+DECLARE_SOA_COLUMN(EnergySectorC4, energySectorC4, float);
+DECLARE_SOA_COLUMN(EnergyCommonC, energyCommonC, float);
 
 } // namespace sptablezdc
 
@@ -53,6 +62,16 @@ DECLARE_SOA_TABLE(SPTableZDC, "AOD", "SPZDC",
                   sptablezdc::QxC,
                   sptablezdc::QyC,
                   sptablezdc::IsSelected,
-                  sptablezdc::EventSelectionFlags);
+                  sptablezdc::EventSelectionFlags,
+                  sptablezdc::EnergySectorA1,
+                  sptablezdc::EnergySectorA2,
+                  sptablezdc::EnergySectorA3,
+                  sptablezdc::EnergySectorA4,
+                  sptablezdc::EnergyCommonA,
+                  sptablezdc::EnergySectorC1,
+                  sptablezdc::EnergySectorC2,
+                  sptablezdc::EnergySectorC3,
+                  sptablezdc::EnergySectorC4,
+                  sptablezdc::EnergyCommonC);
 } // namespace o2::aod
 #endif // PWGCF_DATAMODEL_SPTABLEZDC_H_

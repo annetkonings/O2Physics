@@ -21,34 +21,36 @@
 #include "ALICE3/DataModel/OTFPIDTrk.h"
 #include "ALICE3/DataModel/OTFRICH.h"
 #include "ALICE3/DataModel/OTFTOF.h"
-#include "ALICE3/DataModel/RICH.h"
 #include "ALICE3/Utils/utilsHfAlice3.h"
 #include "Common/Core/RecoDecay.h"
-#include "Common/Core/TrackSelection.h"
 #include "Common/Core/trackUtilities.h"
 #include "Common/DataModel/TrackSelectionTables.h"
 
-#include "CCDB/BasicCCDBManager.h"
-#include "DCAFitter/DCAFitterN.h"
-#include "DataFormatsCalibration/MeanVertexObject.h"
-#include "DataFormatsParameters/GRPMagField.h"
-#include "DataFormatsParameters/GRPObject.h"
-#include "DetectorsBase/GeometryManager.h"
-#include "DetectorsBase/Propagator.h"
-#include "Framework/ASoAHelpers.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/RunningWorkflowInfo.h"
-#include "Framework/runDataProcessing.h"
-#include "ReconstructionDataFormats/Track.h"
+#include <CommonConstants/PhysicsConstants.h>
+#include <DCAFitter/DCAFitterN.h>
+#include <DetectorsBase/Propagator.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/runDataProcessing.h>
+#include <ReconstructionDataFormats/DCA.h>
+#include <ReconstructionDataFormats/Track.h>
+
+#include <TH1.h>
+#include <TMath.h>
+#include <TPDGCode.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
-#include <iterator>
-#include <map>
-#include <utility>
+#include <string>
 #include <vector>
 
 using namespace o2;
@@ -64,7 +66,8 @@ using std::array;
 // #define bitcheck(var, nbit) ((var) & (static_cast<uint32_t>(1) << (nbit)))
 
 // For MC association in pre-selection
-using Alice3TracksWPid = soa::Join<aod::Tracks, aod::TracksCov, aod::Alice3DecayMaps, aod::McTrackLabels, aod::TracksDCA, aod::UpgradeTrkPids, aod::UpgradeTofs, aod::UpgradeRichs>;
+using Alice3TracksWPid = soa::Join<aod::Tracks, aod::TracksCov, aod::Alice3DecayMaps, aod::McTrackLabels, aod::TracksDCA, aod::UpgradeTofs, aod::UpgradeRichs>;
+using Alice3TracksWTrkPid = soa::Join<Alice3TracksWPid, aod::UpgradeTrkPids>;
 
 struct alice3decayFinder {
   SliceCache cache;
@@ -183,18 +186,17 @@ struct alice3decayFinder {
     ((aod::a3DecayMap::decayMap & trackSelectionKaMinusFromD) == trackSelectionKaMinusFromD) && aod::track::signed1Pt < 0.0f && nabs(aod::track::dcaXY) > kaFromD_dcaXYconstant + kaFromD_dcaXYpTdep* nabs(aod::track::signed1Pt);
 
   // partitions for Lc baryons
-  Partition<Alice3TracksWPid> tracksPiPlusFromLc =
+  Partition<Alice3TracksWTrkPid> tracksPiPlusFromLc =
     ((aod::a3DecayMap::decayMap & trackSelectionPiPlusFromLc) == trackSelectionPiPlusFromLc) && aod::track::signed1Pt > 0.0f && nabs(aod::track::dcaXY) > piFromLc_dcaXYconstant + piFromLc_dcaXYpTdep* nabs(aod::track::signed1Pt);
-  Partition<Alice3TracksWPid> tracksKaPlusFromLc =
+  Partition<Alice3TracksWTrkPid> tracksKaPlusFromLc =
     ((aod::a3DecayMap::decayMap & trackSelectionKaPlusFromLc) == trackSelectionKaPlusFromLc) && aod::track::signed1Pt > 0.0f && nabs(aod::track::dcaXY) > kaFromLc_dcaXYconstant + kaFromLc_dcaXYpTdep* nabs(aod::track::signed1Pt);
-  Partition<Alice3TracksWPid> tracksPrPlusFromLc =
+  Partition<Alice3TracksWTrkPid> tracksPrPlusFromLc =
     ((aod::a3DecayMap::decayMap & trackSelectionPrPlusFromLc) == trackSelectionPrPlusFromLc) && aod::track::signed1Pt > 0.0f && nabs(aod::track::dcaXY) > prFromLc_dcaXYconstant + prFromLc_dcaXYpTdep* nabs(aod::track::signed1Pt);
-  // partitions for Lc baryons
-  Partition<Alice3TracksWPid> tracksPiMinusFromLc =
+  Partition<Alice3TracksWTrkPid> tracksPiMinusFromLc =
     ((aod::a3DecayMap::decayMap & trackSelectionPiMinusFromLc) == trackSelectionPiMinusFromLc) && aod::track::signed1Pt < 0.0f && nabs(aod::track::dcaXY) > piFromLc_dcaXYconstant + piFromLc_dcaXYpTdep* nabs(aod::track::signed1Pt);
-  Partition<Alice3TracksWPid> tracksKaMinusFromLc =
+  Partition<Alice3TracksWTrkPid> tracksKaMinusFromLc =
     ((aod::a3DecayMap::decayMap & trackSelectionKaMinusFromLc) == trackSelectionKaMinusFromLc) && aod::track::signed1Pt < 0.0f && nabs(aod::track::dcaXY) > kaFromLc_dcaXYconstant + kaFromLc_dcaXYpTdep* nabs(aod::track::signed1Pt);
-  Partition<Alice3TracksWPid> tracksPrMinusFromLc =
+  Partition<Alice3TracksWTrkPid> tracksPrMinusFromLc =
     ((aod::a3DecayMap::decayMap & trackSelectionPrMinusFromLc) == trackSelectionPrMinusFromLc) && aod::track::signed1Pt < 0.0f && nabs(aod::track::dcaXY) > prFromLc_dcaXYconstant + prFromLc_dcaXYpTdep* nabs(aod::track::signed1Pt);
 
   // Helper struct to pass candidate information
@@ -661,7 +663,7 @@ struct alice3decayFinder {
     if (doprocessFindLc) {
       for (auto const& mcParticle : mcParticles) {
         if (std::abs(mcParticle.pdgCode()) != motherPdgCode) {
-          mcGenFlags(-1, -1, -1);
+          mcGenFlags(-1, 0, 0);
           continue;
         }
         std::vector<int> idxBhadMothers{};
@@ -671,7 +673,7 @@ struct alice3decayFinder {
           auto bHadMother = mcParticles.rawIteratorAt(idxBhadMothers[0]);
           ptBMotherGen = bHadMother.pt();
         }
-        mcGenFlags(origin, ptBMotherGen, mcParticle.pdgCode() ? charmHadFlag : -charmHadFlag);
+        mcGenFlags(origin, ptBMotherGen, mcParticle.pdgCode() > 0 ? charmHadFlag : -charmHadFlag);
         if (mcParticle.pdgCode() > 0) {
           histos.fill(HIST("h2dGen3Prong"), mcParticle.pt(), mcParticle.eta());
         } else {
@@ -1040,9 +1042,9 @@ struct alice3decayFinder {
                           mCandidate3Prong.eta,
                           mCandidate3Prong.phi,
                           mCandidate3Prong.pt,
-                          mCandidate3Prong.Pdaug2[0], mCandidate3Prong.Pdaug2[1], mCandidate3Prong.Pdaug2[2],
-                          mCandidate3Prong.Pdaug1[0], mCandidate3Prong.Pdaug1[1], mCandidate3Prong.Pdaug1[2],
                           mCandidate3Prong.Pdaug0[0], mCandidate3Prong.Pdaug0[1], mCandidate3Prong.Pdaug0[2],
+                          mCandidate3Prong.Pdaug1[0], mCandidate3Prong.Pdaug1[1], mCandidate3Prong.Pdaug1[2],
+                          mCandidate3Prong.Pdaug2[0], mCandidate3Prong.Pdaug2[1], mCandidate3Prong.Pdaug2[2],
                           mCandidate3Prong.impactParameterY0, mCandidate3Prong.impactParameterY1, mCandidate3Prong.impactParameterY2,
                           std::sqrt(mCandidate3Prong.errorImpactParameterY0),
                           std::sqrt(mCandidate3Prong.errorImpactParameterY1),
@@ -1066,15 +1068,27 @@ struct alice3decayFinder {
 
   void processFindLc(aod::Collision const& collision,
                      aod::McParticles const& mcParticles,
-                     Alice3TracksWPid const&)
+                     Alice3TracksWTrkPid const& tracks)
   {
+    LOG(debug) << "Processing Lc candidates for collision " << collision.globalIndex() << " with " << tracks.size() << " tracks";
+    for (auto const& track : tracks) {
+      if (track.has_mcParticle()) {
+        LOG(debug) << "  - track index: " << track.globalIndex() << ", pT: " << track.pt() << " (MC pt " << track.mcParticle().pt() << "), PID: " << track.mcParticle().pdgCode();
+      }
+    }
 
     auto tracksPiPlus = tracksPiPlusFromLc->sliceByCached(aod::track::collisionId, collision.globalIndex(), cache);
+    LOG(debug) << "  - found " << tracksPiPlus.size() << " pi+ from Lc";
     auto tracksKaPlus = tracksKaPlusFromLc->sliceByCached(aod::track::collisionId, collision.globalIndex(), cache);
+    LOG(debug) << "  - found " << tracksKaPlus.size() << " K+ from Lc";
     auto tracksPrPlus = tracksPrPlusFromLc->sliceByCached(aod::track::collisionId, collision.globalIndex(), cache);
+    LOG(debug) << "  - found " << tracksPrPlus.size() << " p+ from Lc";
     auto tracksPiMinus = tracksPiMinusFromLc->sliceByCached(aod::track::collisionId, collision.globalIndex(), cache);
+    LOG(debug) << "  - found " << tracksPiMinus.size() << " pi- from Lc";
     auto tracksKaMinus = tracksKaMinusFromLc->sliceByCached(aod::track::collisionId, collision.globalIndex(), cache);
+    LOG(debug) << "  - found " << tracksKaMinus.size() << " K- from Lc";
     auto tracksPrMinus = tracksPrMinusFromLc->sliceByCached(aod::track::collisionId, collision.globalIndex(), cache);
+    LOG(debug) << "  - found " << tracksPrMinus.size() << " p- from Lc";
 
     if (doDCAplots3Prong) {
       for (auto const& track : tracksPiPlus)

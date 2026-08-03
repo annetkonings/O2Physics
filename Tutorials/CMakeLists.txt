@@ -19,6 +19,11 @@ add_subdirectory(PWGCF)
 add_subdirectory(PWGMM)
 add_subdirectory(PWGHF)
 
+# Added myself
+add_subdirectory(FlowTasks)
+add_subdirectory(MyStudies)
+# End self
+
 o2physics_add_dpl_workflow(histogram-track-selection
                     SOURCES src/histogramTrackSelection.cxx
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore

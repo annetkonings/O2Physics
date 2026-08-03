@@ -11,12 +11,14 @@
 /// \author Nima Zardoshti <nima.zardoshti@cern.ch>, CERN
 
 // O2 includes
-#include "ReconstructionDataFormats/Track.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/ASoAHelpers.h"
-#include "Common/DataModel/TrackSelectionTables.h"
 #include "DataModel/DerivedExampleTable.h"
+
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include "Framework/ASoAHelpers.h" // For filter
+#include "Framework/AnalysisDataModel.h"
+#include "Framework/AnalysisTask.h"
+#include "ReconstructionDataFormats/Track.h"
 
 using namespace o2;
 using namespace o2::framework;
@@ -25,6 +27,18 @@ using namespace o2::framework::expressions;
 #include "Framework/runDataProcessing.h"
 
 struct DerivedBasicConsumer {
+
+  // Added myself:
+  SliceCache cache;
+
+  Configurable<float> associatedMinPt{"associatedMinPt", 4.0f, "min pT (GeV/c)"};
+  Configurable<float> associatedMaxPt{"associatedMaxPt", 6.0f, "min pT (GeV/c)"};
+  Configurable<float> triggerMinPt{"triggerMinPt", 6.0f, "min pT (GeV/c)"};
+
+  Filter collZfilter = nabs(aod::collision::posZ) < 10.0f;
+  Partition<aod::DrTracks> associatedTracks = aod::exampleTrackSpace::pt < associatedMaxPt && aod::exampleTrackSpace::pt > associatedMinPt;
+  Partition<aod::DrTracks> triggerTracks = aod::exampleTrackSpace::pt > triggerMinPt;
+
   /// Function to aid in calculating delta-phi
   /// \param phi1 first phi value
   /// \param phi2 second phi value
@@ -47,12 +61,34 @@ struct DerivedBasicConsumer {
   {
     // define axes you want to use
     const AxisSpec axisCounter{1, 0, +1, ""};
+    const AxisSpec axisPt{100, 0, 20, "p_{T} (GeV/c)"};
+    const AxisSpec axisDeltaPhi{100, -0.5 * TMath::Pi(), +1.5 * TMath::Pi(), "#Delta#phi"};
+    const AxisSpec axisDeltaEta{100, -1.0, +1.0, "#Delta#eta"};
     histos.add("eventCounter", "eventCounter", kTH1F, {axisCounter});
+    histos.add("ptAssoHistogram", "ptAssoHistogram", kTH1F, {axisPt});
+    histos.add("ptTrigHistogram", "ptTrigHistogram", kTH1F, {axisPt});
+    histos.add("correlationFunction", "correlationFunction", kTH1F, {axisDeltaPhi});
+    histos.add("correlationFunction2d", "correlationFunction2d", kTH2F, {axisDeltaPhi, axisDeltaEta});
   }
 
-  void process(aod::DrCollision const& /*collision*/)
+  // void process(aod::DrCollision const& /*collision*/)
+  void process(soa::Filtered<aod::DrCollisions>::iterator const& collision, aod::DrTracks const& tracks)
   {
+    auto assoTracksThisCollision = associatedTracks->sliceByCached(aod::exampleTrackSpace::drCollisionId, collision.globalIndex(), cache);
+    auto trigTracksThisCollision = triggerTracks->sliceByCached(aod::exampleTrackSpace::drCollisionId, collision.globalIndex(), cache);
     histos.fill(HIST("eventCounter"), 0.5);
+    for (auto& track : assoTracksThisCollision) {
+      histos.fill(HIST("ptAssoHistogram"), track.pt());
+    }
+    for (auto& track : trigTracksThisCollision) {
+      histos.fill(HIST("ptTrigHistogram"), track.pt());
+    }
+    for (auto& [trigger, associated] :
+         combinations(o2::soa::CombinationsFullIndexPolicy(trigTracksThisCollision, assoTracksThisCollision))) {
+      histos.fill(HIST("correlationFunction"), ComputeDeltaPhi(trigger.phi(), associated.phi()));
+      histos.fill(HIST("correlationFunction2d"), ComputeDeltaPhi(trigger.phi(), associated.phi()),
+                  trigger.eta() - associated.eta());
+    }
   }
 };
 

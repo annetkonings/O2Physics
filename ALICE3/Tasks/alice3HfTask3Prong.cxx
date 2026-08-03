@@ -14,16 +14,11 @@
 /// \author Marcello Di Costanzo <marcello.di.costanzo@cern.ch>, Polytechnic University of Turin and INFN Turin
 
 #include "ALICE3/DataModel/A3DecayFinderTables.h"
-#include "ALICE3/DataModel/OTFPIDTrk.h"
-#include "ALICE3/DataModel/OTFRICH.h"
-#include "ALICE3/DataModel/OTFTOF.h"
-#include "ALICE3/DataModel/RICH.h"
 #include "ALICE3/Utils/utilsHfAlice3.h"
 #include "ALICE3/Utils/utilsSelectionsAlice3.h"
 #include "Common/Core/RecoDecay.h"
 
 #include <CCDB/BasicCCDBManager.h>
-#include <CommonConstants/PhysicsConstants.h>
 #include <Framework/ASoA.h>
 #include <Framework/AnalysisDataModel.h>
 #include <Framework/AnalysisHelpers.h>
@@ -33,12 +28,12 @@
 #include <Framework/HistogramSpec.h>
 #include <Framework/InitContext.h>
 #include <Framework/Logger.h>
-#include <Framework/OutputObjHeader.h>
 #include <Framework/runDataProcessing.h>
 
 #include <TH1.h>
+#include <TH2.h>
 #include <THnSparse.h>
-#include <TPDGCode.h>
+#include <TString.h>
 
 #include <array>
 #include <cmath>
@@ -58,6 +53,7 @@ struct Alice3HfTask3Prong {
   Configurable<double> yCandRecoMax{"yCandRecoMax", 0.8, "max. cand. rapidity"};
   Configurable<std::vector<double>> binsPt{"binsPt", std::vector<double>{hf_cuts_3prongs_alice3::vecBinsPt}, "pT bin limits"};
   Configurable<bool> fillThn{"fillThn", false, "fill Thn"};
+  Configurable<bool> fillSwapMassHypo{"fillSwapMassHypo", false, "Flag to fill derived tables with swapped mass hypothesis"};
   Configurable<std::string> ccdbUrl{"ccdbUrl", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
   Configurable<std::string> ccdbPathGrp{"ccdbPathGrp", "GLO/GRP/GRP", "Path of the grp file (Run 2)"};
   Configurable<std::string> ccdbPathGrpMag{"ccdbPathGrpMag", "GLO/Config/GRPMagField", "CCDB path of the GRPMagField object (Run 3)"};
@@ -87,14 +83,15 @@ struct Alice3HfTask3Prong {
   HistogramRegistry registry{"registry", {}};
 
   // Names of folders and suffixes for MC signal histograms
-  constexpr static std::string_view SignalFolders[] = {"signal", "prompt", "nonprompt"};
-  constexpr static std::string_view SignalSuffixes[] = {"", "Prompt", "NonPrompt"};
-
   enum SignalClasses : int {
     Signal = 0,
     Prompt,
-    NonPrompt
+    NonPrompt,
+    Bkg,
+    NSignalClasses
   };
+  constexpr static std::string_view SignalFolders[SignalClasses::NSignalClasses] = {"signal", "prompt", "nonprompt", "background"};
+  constexpr static std::string_view SignalSuffixes[SignalClasses::NSignalClasses] = {"", "Prompt", "NonPrompt", "Bkg"};
 
   void init(InitContext&)
   {
@@ -109,9 +106,11 @@ struct Alice3HfTask3Prong {
     }
 
     auto addHistogramsRec = [&](const std::string& histoName, const std::string& xAxisTitle, const std::string& yAxisTitle, const HistogramConfigSpec& configSpec) {
-      registry.add(("MC/rec/signal/" + histoName + "RecSig").c_str(), ("3-prong cands (matched);" + xAxisTitle + ";" + yAxisTitle).c_str(), configSpec);
-      registry.add(("MC/rec/prompt/" + histoName + "RecSigPrompt").c_str(), ("3-prong cands (matched, prompt);" + xAxisTitle + ";" + yAxisTitle).c_str(), configSpec);
-      registry.add(("MC/rec/nonprompt/" + histoName + "RecSigNonPrompt").c_str(), ("3-prong cands (matched, non-prompt);" + xAxisTitle + ";" + yAxisTitle).c_str(), configSpec);
+      const char* basePath = "MC/rec";
+      registry.add(Form("%s/signal/%sRecSig%s", basePath, histoName.c_str(), SignalSuffixes[SignalClasses::Signal].data()), ("3-prong cands (matched);" + xAxisTitle + ";" + yAxisTitle).c_str(), configSpec);
+      registry.add(Form("%s/prompt/%sRecSig%s", basePath, histoName.c_str(), SignalSuffixes[SignalClasses::Prompt].data()), ("3-prong cands (matched, prompt);" + xAxisTitle + ";" + yAxisTitle).c_str(), configSpec);
+      registry.add(Form("%s/nonprompt/%sRecSig%s", basePath, histoName.c_str(), SignalSuffixes[SignalClasses::NonPrompt].data()), ("3-prong cands (matched, non-prompt);" + xAxisTitle + ";" + yAxisTitle).c_str(), configSpec);
+      registry.add(Form("%s/background/%sRecSig%s", basePath, histoName.c_str(), SignalSuffixes[SignalClasses::Bkg].data()), ("3-prong cands (unmatched);" + xAxisTitle + ";" + yAxisTitle).c_str(), configSpec);
     };
 
     auto addHistogramsGen = [&](const std::string& histoName, const std::string& xAxisTitle, const std::string& yAxisTitle, const HistogramConfigSpec& configSpec) {
@@ -174,9 +173,16 @@ struct Alice3HfTask3Prong {
     auto h2 = registry.add<TH2>("hSelectionStatus", "3-prong cands;selection status;entries", {HistType::kTH2F, {{5, -0.5, 4.5}, {vbins, "#it{p}_{T} (GeV/#it{c})"}}});
     h2->GetXaxis()->SetBinLabel(1, "mass hypo 0");
     h2->GetXaxis()->SetBinLabel(2, "mass hypo 1");
-    auto h = registry.add<TH1>("MC/rec/hCandidateCounter", "Candidate counter;entries", {HistType::kTH1D, {{2, -0.5, 1.5}}});
+    auto h = registry.add<TH1>("MC/rec/hCandidateCounter", "Candidate counter;entries", {HistType::kTH1D, {{4, -0.5, 3.5}}});
     h->GetXaxis()->SetBinLabel(1, "Calls");
     h->GetXaxis()->SetBinLabel(2, "Candidates");
+    h->GetXaxis()->SetBinLabel(3, "Passed Y cut");
+    h->GetXaxis()->SetBinLabel(4, "Has MC match");
+
+    registry.add("MC/rec/hPtDeltaProng0", ";prong 0 (#it{p}_{T}-#it{p}_{T, gen}) (GeV/#it{c});entries", {HistType::kTH1F, {{100, -5, 5.}}});
+    registry.add("MC/rec/hPtDeltaProng1", ";prong 1 (#it{p}_{T}-#it{p}_{T, gen}) (GeV/#it{c});entries", {HistType::kTH1F, {{100, -5, 5.}}});
+    registry.add("MC/rec/hPtDeltaProng2", ";prong 2 (#it{p}_{T}-#it{p}_{T, gen}) (GeV/#it{c});entries", {HistType::kTH1F, {{100, -5, 5.}}});
+
     // Number of events processed
     h = registry.add<TH1>("hNEventsProcessed", "number of events processed;entries;", {HistType::kTH1F, {{2, 0.5, 2.5}}});
     h->GetXaxis()->SetBinLabel(1, "Generated");
@@ -207,7 +213,7 @@ struct Alice3HfTask3Prong {
   /// Helper function for filling MC reconstructed histograms for prompt, nonpromt and common (signal)
   /// \param candidate is a reconstructed candidate
   /// \tparam SignalType is an enum defining which histogram in which folder (signal, prompt or nonpromt) to fill
-  template <CharmHadAlice3 CharmHad, int SignalType, typename CandidateType>
+  template <CharmHadAlice3 CharmHad, SignalClasses SignalType, typename CandidateType>
   void fillHistogramsRecSig(CandidateType const& candidate, float mass, bool isSwapped = false)
   {
     static constexpr auto histoPrefix = HIST("MC/rec/") + HIST(SignalFolders[SignalType]) + HIST("/");
@@ -268,21 +274,38 @@ struct Alice3HfTask3Prong {
       if (yCandRecoMax >= 0. && std::abs(hfHelper.getCandY<CharmHad>(candidate)) > yCandRecoMax) {
         continue;
       }
-      auto mcParticle = allParticles.iteratorAt(candidate.particleMcRec());
-      if (candidate.particleMcRec() > 0) {
+      registry.fill(HIST("MC/rec/hCandidateCounter"), 2.);
+      if (candidate.particleMcRec() >= 0) {
+        registry.fill(HIST("MC/rec/hCandidateCounter"), 3.);
+        auto mcParticle = allParticles.iteratorAt(candidate.particleMcRec());
         if (mcParticle.has_daughters()) {
           auto daughters = mcParticle.daughtersIds();
-          LOG(info) << "Reco candidate matched to MC particle with PDG " << mcParticle.pdgCode() << " daughters: " << daughters.size();
-          for (auto dauId : daughters) {
+          LOG(debug) << "Reco candidate matched to MC particle with PDG " << mcParticle.pdgCode() << " daughters: " << daughters.size();
+          int prongIdx = 0;
+          for (int dauId = daughters[0]; dauId <= daughters[1]; dauId++) {
             auto dau = allParticles.iteratorAt(dauId);
-            LOG(info) << "  dauId: " << dauId << " PDG: " << dau.pdgCode();
+            LOG(debug) << "  dauId: " << dauId << " PDG: " << dau.pdgCode() << " with pT: " << dau.pt();
+            switch (prongIdx) {
+              case 0:
+                registry.fill(HIST("MC/rec/hPtDeltaProng0"), candidate.ptProng0() - dau.pt());
+                break;
+              case 1:
+                registry.fill(HIST("MC/rec/hPtDeltaProng1"), candidate.ptProng1() - dau.pt());
+                break;
+              case 2:
+                registry.fill(HIST("MC/rec/hPtDeltaProng2"), candidate.ptProng2() - dau.pt());
+                break;
+              default:
+                break;
+            }
+            prongIdx++;
           }
         }
       }
 
-      if (candidate.flagMcRec() != 0) {
-        // Get the corresponding MC particle.
+      if (candidate.flagMcRec() != 0) { // Particle is matched to MC truth
 
+        // Get the corresponding MC particle.
         const auto pt = candidate.pt();
         const auto originType = candidate.originMcRec();
 
@@ -290,11 +313,11 @@ struct Alice3HfTask3Prong {
           registry.fill(HIST("hSelectionStatus"), 0., pt);
           double mass = hfHelper.getCandMass<CharmHad, false>(candidate);
           /// Fill histograms
-          fillHistogramsRecSig<CharmHad, Signal>(candidate, mass, false);
+          fillHistogramsRecSig<CharmHad, SignalClasses::Signal>(candidate, mass, false);
           if (originType == RecoDecay::OriginType::Prompt) {
-            fillHistogramsRecSig<CharmHad, Prompt>(candidate, mass, false);
+            fillHistogramsRecSig<CharmHad, SignalClasses::Prompt>(candidate, mass, false);
           } else if (originType == RecoDecay::OriginType::NonPrompt) {
-            fillHistogramsRecSig<CharmHad, NonPrompt>(candidate, mass, false);
+            fillHistogramsRecSig<CharmHad, SignalClasses::NonPrompt>(candidate, mass, false);
           }
           if (fillThn) {
             std::vector<double> valuesToFill{mass, pt};
@@ -308,26 +331,39 @@ struct Alice3HfTask3Prong {
             registry.get<THnSparse>(HIST("hSparseRec"))->Fill(valuesToFill.data());
           }
         }
-        if (candidate.isSelMassHypo1()) {
-          registry.fill(HIST("hSelectionStatus"), 1., pt);
-          double mass = hfHelper.getCandMass<CharmHad, true>(candidate);
-          /// Fill histograms
-          fillHistogramsRecSig<CharmHad, Signal>(candidate, mass, true);
-          if (originType == RecoDecay::OriginType::Prompt) {
-            fillHistogramsRecSig<CharmHad, Prompt>(candidate, mass, true);
-          } else if (originType == RecoDecay::OriginType::NonPrompt) {
-            fillHistogramsRecSig<CharmHad, NonPrompt>(candidate, mass, true);
-          }
-          if (fillThn) {
-            std::vector<double> valuesToFill{mass, pt};
-            if constexpr (SaveMl) {
-              LOGP(fatal, "Trying to access ML scores, but SaveMl is false!");
-              valuesToFill.push_back(candidate.mlScore0());
-              valuesToFill.push_back(candidate.mlScore1());
-              valuesToFill.push_back(candidate.mlScore2());
+        if (fillSwapMassHypo) {
+          if (candidate.isSelMassHypo1()) {
+            registry.fill(HIST("hSelectionStatus"), 1., pt);
+            double mass = hfHelper.getCandMass<CharmHad, true>(candidate);
+            /// Fill histograms
+            fillHistogramsRecSig<CharmHad, SignalClasses::Signal>(candidate, mass, true);
+            if (originType == RecoDecay::OriginType::Prompt) {
+              fillHistogramsRecSig<CharmHad, SignalClasses::Prompt>(candidate, mass, true);
+            } else if (originType == RecoDecay::OriginType::NonPrompt) {
+              fillHistogramsRecSig<CharmHad, SignalClasses::NonPrompt>(candidate, mass, true);
             }
-            valuesToFill.push_back(static_cast<double>(originType));
-            registry.get<THnSparse>(HIST("hSparseRec"))->Fill(valuesToFill.data());
+            if (fillThn) {
+              std::vector<double> valuesToFill{mass, pt};
+              if constexpr (SaveMl) {
+                LOGP(fatal, "Trying to access ML scores, but SaveMl is false!");
+                valuesToFill.push_back(candidate.mlScore0());
+                valuesToFill.push_back(candidate.mlScore1());
+                valuesToFill.push_back(candidate.mlScore2());
+              }
+              valuesToFill.push_back(static_cast<double>(originType));
+              registry.get<THnSparse>(HIST("hSparseRec"))->Fill(valuesToFill.data());
+            }
+          }
+        }
+      } else { // Background
+        if (candidate.isSelMassHypo0()) {
+          double mass = hfHelper.getCandMass<CharmHad, false>(candidate);
+          fillHistogramsRecSig<CharmHad, SignalClasses::Bkg>(candidate, mass, false);
+        }
+        if (fillSwapMassHypo) {
+          if (candidate.isSelMassHypo1()) {
+            double mass = hfHelper.getCandMass<CharmHad, true>(candidate);
+            fillHistogramsRecSig<CharmHad, SignalClasses::Bkg>(candidate, mass, true);
           }
         }
       }
