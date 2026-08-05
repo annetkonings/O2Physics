@@ -10,7 +10,7 @@
 // or submit itself to any jurisdiction.
 
 /// \file   flowDeltav1SP.cxx
-/// \author Annet Konings (based on flowSP by Noor Koster)
+/// \author Annet Konings (based on flowSP.cxx by Noor Koster)
 /// \since  30/07/2026
 /// \brief  task to evaluate flow with respect to spectator plane with pions, kaons, protons. I have kept the data and MC processing parts for possible future use
 
@@ -905,7 +905,7 @@ struct FlowDeltav1SP {
             return std::abs(nSigmaTPC) < NSigmaTPC_Species;
           } else if (p >= pBoundary) {
               // Require TPC and TOF
-              return (std::abs(nSigmaTPC) < NSigmaTPC_Species) && std::abs(nSigmaTOF) < NSigmaTOF_Species;
+              return hasTOF && std::abs(nSigmaTPC) < NSigmaTPC_Species && std::abs(nSigmaTOF) < NSigmaTOF_Species;
           }
           return false;
       };
@@ -916,7 +916,7 @@ struct FlowDeltav1SP {
 
       // Pions
       if (passesSpeciesPID(nSigmaPiTPC, nSigmaPiTOF, cfg.pid.cPBoundaryPi, cfg.pid.cNSigmaTPC_Pi, cfg.pid.cNSigmaTOF_Pi)) {
-        float dist = (p < cfg.pid.cPBoundaryPi) ? std::abs(nSigmaPiTPC) : std::hypot(nSigmaPiTPC, nSigmaPiTOF);
+        float dist = (p < cfg.pid.cPBoundaryPi) ? std::abs(nSigmaPiTPC) : std::max(std::abs(nSigmaPiTPC), std::abs(nSigmaPiTOF));
         if (dist < bestNSigma) {
           bestNSigma = dist;
           valPID = kPions;
@@ -925,7 +925,7 @@ struct FlowDeltav1SP {
 
       // Kaons
       if (passesSpeciesPID(nSigmaKaTPC, nSigmaKaTOF, cfg.pid.cPBoundaryKa, cfg.pid.cNSigmaTPC_Ka, cfg.pid.cNSigmaTOF_Ka)) {
-        float dist = (p < cfg.pid.cPBoundaryKa) ? std::abs(nSigmaKaTPC) : std::hypot(nSigmaKaTPC, nSigmaKaTOF);
+        float dist = (p < cfg.pid.cPBoundaryKa) ? std::abs(nSigmaKaTPC) : std::max(std::abs(nSigmaKaTPC), std::abs(nSigmaKaTOF));
         if (dist < bestNSigma) {
           bestNSigma = dist;
           valPID = kKaons;
@@ -934,7 +934,7 @@ struct FlowDeltav1SP {
 
       // Protons
       if (passesSpeciesPID(nSigmaPrTPC, nSigmaPrTOF, cfg.pid.cPBoundaryPr, cfg.pid.cNSigmaTPC_Pr, cfg.pid.cNSigmaTOF_Pr)) {
-        float dist = (p < cfg.pid.cPBoundaryPr) ? std::abs(nSigmaPrTPC) : std::hypot(nSigmaPrTPC, nSigmaPrTOF);
+        float dist = (p < cfg.pid.cPBoundaryPr) ? std::abs(nSigmaPrTPC) : std::max(std::abs(nSigmaPrTPC), std::abs(nSigmaPrTOF));
         if (dist < bestNSigma) {
           bestNSigma = dist;
           valPID = kProtons;
@@ -955,27 +955,29 @@ struct FlowDeltav1SP {
     float dEdxDiff  = 0.f;
     float betaDiff  = 0.f;
 
+    const bool hasTOF = track.hasTOF();
+
     // Get species-specific variables using
     if constexpr (par == kPions) {
       nsigmaTPC = track.tpcNSigmaPi();
       dEdxDiff  = track.tpcExpSignalDiffPi();
-      if constexpr (framework::has_type_v<aod::pidtof::TOFNSigmaPi, typename TrackObject::all_columns>) { 
-        nsigmaTOF = track.tofNSigmaPi();
-        betaDiff  = track.tofExpSignalDiffPi();
-      }
+      if (hasTOF) {
+            nsigmaTOF = track.tofNSigmaPi();
+            betaDiff  = track.tofExpSignalDiffPi();
+        }
     }
     else if constexpr (par == kKaons) {
       nsigmaTPC = track.tpcNSigmaKa();
       dEdxDiff  = track.tpcExpSignalDiffKa();
-      if constexpr (framework::has_type_v<aod::pidtof::TOFNSigmaKa, typename TrackObject::all_columns>) {
-        nsigmaTOF = track.tofNSigmaKa();
-        betaDiff  = track.tofExpSignalDiffKa();
-      }
+      if (hasTOF) {
+            nsigmaTOF = track.tofNSigmaKa();
+            betaDiff  = track.tofExpSignalDiffKa();
+        }
     }
     else if constexpr (par == kProtons) {
       nsigmaTPC = track.tpcNSigmaPr();
       dEdxDiff  = track.tpcExpSignalDiffPr();
-      if constexpr (framework::has_type_v<aod::pidtof::TOFNSigmaPr, typename TrackObject::all_columns>) {
+      if (hasTOF) {
         nsigmaTOF = track.tofNSigmaPr();
         betaDiff  = track.tofExpSignalDiffPr();
       }
@@ -2032,9 +2034,9 @@ template <typename TCollision>
       bool passTPCKaon = std::abs(track.tpcNSigmaKa()) < cfg.pid.cNSigmaTPC_Ka;
       bool passTPCProton = std::abs(track.tpcNSigmaPr()) < cfg.pid.cNSigmaTPC_Pr;
       
-      bool passTOFPion = false;
-      bool passTOFKaon = false;
-      bool passTOFProton = false;
+      bool passTOFPion = true; // default to true for p < cPBoundary
+      bool passTOFKaon = true; // default to true for p < cPBoundary
+      bool passTOFProton = true; // default to true for p < cPBoundary
 
       // Check TOF requirements against species-specific momentum boundaries
       if (p >= cfg.pid.cPBoundaryPi) {
