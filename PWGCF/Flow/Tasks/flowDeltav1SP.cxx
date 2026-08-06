@@ -884,7 +884,6 @@ struct FlowDeltav1SP {
       }
 
       const float p = track.p();
-      const float tpcInnerParam = track.tpcInnerParam();
       const bool hasTOF = track.hasTOF();
 
       // Store signed TPC PID responses
@@ -892,10 +891,10 @@ struct FlowDeltav1SP {
       const float nSigmaKaTPC = track.tpcNSigmaKa();
       const float nSigmaPrTPC = track.tpcNSigmaPr();
 
-      // Store TOF responses (if present, else 0.0f)
-      const float nSigmaPiTOF = hasTOF ? track.tofNSigmaPi() : 0.0f;
-      const float nSigmaKaTOF = hasTOF ? track.tofNSigmaKa() : 0.0f;
-      const float nSigmaPrTOF = hasTOF ? track.tofNSigmaPr() : 0.0f;
+      // Store TOF responses (if present, else 999f)
+      const float nSigmaPiTOF = hasTOF ? track.tofNSigmaPi() : 999.f;
+      const float nSigmaKaTOF = hasTOF ? track.tofNSigmaKa() : 999.f;
+      const float nSigmaPrTOF = hasTOF ? track.tofNSigmaPr() : 999.f;
 
       
       // Species hypothesis tester
