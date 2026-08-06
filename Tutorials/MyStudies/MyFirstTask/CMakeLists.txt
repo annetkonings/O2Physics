@@ -10,13 +10,7 @@
 # or submit itself to any jurisdiction.
 
 # Basic analysis tutorial
-o2physics_add_dpl_workflow(my-example-task
-                  SOURCES myExampleTask.cxx
-                  PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
-                  COMPONENT_NAME AnalysisTutorial)
-
-
-o2physics_add_dpl_workflow(pid-test
-                  SOURCES PIDTest.cxx
+o2physics_add_dpl_workflow(my-task
+                  SOURCES MyTask.cxx
                   PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                   COMPONENT_NAME AnalysisTutorial)

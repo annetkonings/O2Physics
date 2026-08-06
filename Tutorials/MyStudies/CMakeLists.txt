@@ -9,14 +9,8 @@
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
 
-# Basic analysis tutorial
-o2physics_add_dpl_workflow(my-example-task
-                  SOURCES myExampleTask.cxx
-                  PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
-                  COMPONENT_NAME AnalysisTutorial)
+# Added myself
+add_subdirectory(MyFirstTask)
 
 
-o2physics_add_dpl_workflow(pid-test
-                  SOURCES PIDTest.cxx
-                  PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
-                  COMPONENT_NAME AnalysisTutorial)
+# End self
